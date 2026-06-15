@@ -14,16 +14,14 @@ import org.springframework.web.client.RestTemplate;
 
 /**
  * 启动类
- *
- * @author hunter
  */
 @Slf4j
 @EnableScheduling
 @ServletComponentScan
 @SpringBootApplication(
-    exclude = {
-        DataSourceAutoConfiguration.class
-    }
+        exclude = {
+                DataSourceAutoConfiguration.class
+        }
 )
 public class Application {
 

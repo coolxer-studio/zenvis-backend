@@ -5,13 +5,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 
 /**
  * web配置类
- *
- * @author hunter
  */
 @Configuration
 @Slf4j
@@ -19,6 +18,9 @@ public class CustomWebMvcConfig implements WebMvcConfigurer {
 
     @Autowired
     private AuthorityInterceptor authorityInterceptor;
+
+    @Autowired
+    private CustomWebConfig customWebConfig;
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
@@ -30,9 +32,18 @@ public class CustomWebMvcConfig implements WebMvcConfigurer {
                         "/",
                         "/risk_index/**",
                         "/index.html",
-                        "/static/**"
+                        "/static/**",
+                        "/system-files/**"
                 );
 
+    }
+
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        // 配置系统信息文件访问路径
+        // 前端可以通过 /system-files/{filename} 访问 sysInfoPath 目录下的文件
+        registry.addResourceHandler("/system-files/**")
+                .addResourceLocations("file:" + customWebConfig.getSysInfoPath() + "/");
     }
 
 }
