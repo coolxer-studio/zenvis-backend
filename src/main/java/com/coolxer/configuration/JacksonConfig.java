@@ -17,8 +17,6 @@ import java.util.TimeZone;
 
 /**
  * jackson 配置类
- *
- * @author hunter
  */
 
 @Configuration
