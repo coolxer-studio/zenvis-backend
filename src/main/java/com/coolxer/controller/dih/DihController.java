@@ -1,0 +1,71 @@
+package com.coolxer.controller.dih;
+
+import com.coolxer.commons.enums.ResultCodeEnum;
+import com.coolxer.model.base.vo.ResponseWrap;
+import com.coolxer.model.dih.SuggestDto;
+import com.coolxer.service.dih.AIBaseService;
+import com.coolxer.service.dih.AIGeneralCompleteService;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 数智中心
+ */
+@Api
+@Slf4j
+@RestController
+@RequestMapping("/api/v1/dih")
+public class DihController {
+
+    @Autowired
+    private AIBaseService baseService;
+
+    @Autowired
+    private AIGeneralCompleteService completeService;
+
+    /**
+     * 获取建议
+     *
+     * @param suggestDto
+     * @return
+     */
+    @PostMapping(value = "/suggest")
+    @ApiOperation(value = "补全建议", notes = "补全建议")
+    public ResponseWrap<String> suggest(@RequestBody SuggestDto suggestDto) {
+        try {
+            String currentLine = suggestDto.getCurrentLine().substring(0, suggestDto.getCurrentLine().length() - 2);
+            String context = suggestDto.getContent().replace(suggestDto.getCurrentLine(), currentLine);
+            String prompt = "上下文：%s\n当前行：%s\n".formatted(context, currentLine);
+            String suggest = completeService.complete(prompt);
+//            String prefixContent = context.substring(0, context.lastIndexOf(currentLine));
+//            String suffixContent = context.substring(context.lastIndexOf(currentLine));
+//            String suggest = completeService.completeCode(prefixContent, suffixContent);
+            return ResponseWrap.success(suggest);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return ResponseWrap.success("AI暂无可用建议");
+    }
+
+    @GetMapping("/model/list")
+    public ResponseWrap<List<Map<String, String>>> modelList() {
+        List<Map<String, String>> dashScope = baseService.getDashScope();
+        if (dashScope.isEmpty()) {
+            return ResponseWrap.fail(ResultCodeEnum.NO_AUTHORITY);
+        }
+        return ResponseWrap.success(dashScope);
+    }
+
+    @GetMapping("/health")
+    public ResponseWrap<String> health() {
+
+        return ResponseWrap.success("is running......");
+    }
+
+}

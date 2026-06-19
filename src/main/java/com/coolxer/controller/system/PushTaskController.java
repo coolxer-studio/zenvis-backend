@@ -1,6 +1,5 @@
 package com.coolxer.controller.system;
 
-import com.coolxer.model.base.vo.ResponseWrap;
 import com.coolxer.service.system.PushTaskService;
 import io.swagger.annotations.Api;
 import jakarta.servlet.http.HttpServletRequest;
@@ -23,7 +22,7 @@ public class PushTaskController {
     private PushTaskService pushTaskService;
 
     @RequestMapping("/**")
-    public ResponseWrap<?> proxy(HttpServletRequest request) {
+    public Object proxy(HttpServletRequest request) {
         return pushTaskService.proxy(request);
     }
 

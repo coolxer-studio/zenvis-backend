@@ -25,8 +25,6 @@ import java.util.Map;
 
 /**
  * 资产管理-主机
- *
- * @author hunter
  */
 @Api
 @Slf4j

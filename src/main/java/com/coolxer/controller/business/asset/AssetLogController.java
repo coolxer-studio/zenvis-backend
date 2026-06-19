@@ -22,8 +22,6 @@ import java.util.stream.Collectors;
 
 /**
  * 资产管理-日志资产
- *
- * @author hunter
  */
 @Api
 @Slf4j

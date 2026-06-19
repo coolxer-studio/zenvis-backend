@@ -16,8 +16,6 @@ import java.util.Map;
 
 /**
  * 控制器公共方法
- *
- * @author hunter
  */
 @Slf4j
 @RestController

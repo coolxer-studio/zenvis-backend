@@ -22,8 +22,6 @@ import java.util.Map;
 
 /**
  * API接口资产
- *
- * @author hunter
  */
 @Slf4j
 @RestController
