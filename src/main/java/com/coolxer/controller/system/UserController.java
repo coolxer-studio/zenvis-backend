@@ -18,8 +18,6 @@ import org.springframework.web.bind.annotation.*;
 
 /**
  * 用户管理
- *
- * @author hunter
  */
 @Api
 @Slf4j

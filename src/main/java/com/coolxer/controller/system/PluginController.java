@@ -29,8 +29,6 @@ import java.util.List;
 
 /**
  * 插件管理
- *
- * @author hunter
  */
 @Api
 @Slf4j

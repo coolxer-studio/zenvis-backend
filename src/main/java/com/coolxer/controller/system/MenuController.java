@@ -25,8 +25,6 @@ import java.util.Map;
 
 /**
  * 菜单管理
- *
- * @author hunter
  */
 @Api
 @Slf4j

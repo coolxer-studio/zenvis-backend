@@ -24,8 +24,6 @@ import java.util.Map;
 
 /**
  * 角色管理
- *
- * @author hunter
  */
 @Slf4j
 @RestController

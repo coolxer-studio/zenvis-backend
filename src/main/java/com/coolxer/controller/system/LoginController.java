@@ -29,8 +29,6 @@ import java.time.Duration;
 
 /**
  * 登录
- *
- * @author hunter
  */
 @Api
 @Slf4j

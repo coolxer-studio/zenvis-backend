@@ -23,8 +23,6 @@ import java.util.Map;
 
 /**
  * 看板管理
- *
- * @author hunter
  */
 @Api
 @Slf4j
