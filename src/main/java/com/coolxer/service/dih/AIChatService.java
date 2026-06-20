@@ -1,0 +1,137 @@
+package com.coolxer.service.dih;
+
+import com.alibaba.cloud.ai.dashscope.api.DashScopeApi;
+import com.alibaba.cloud.ai.dashscope.api.DashScopeResponseFormat;
+import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
+import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
+import com.alibaba.cloud.ai.memory.jdbc.MysqlChatMemoryRepository;
+import com.coolxer.service.dih.advisor.ReasoningContentAdvisor;
+import com.coolxer.service.dih.rag.VectorStoreDelegate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
+import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
+import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.memory.ChatMemoryRepository;
+import org.springframework.ai.chat.memory.MessageWindowChatMemory;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.prompt.PromptTemplate;
+import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
+
+import javax.sql.DataSource;
+import java.util.Objects;
+
+/**
+ * 聊天服务
+ */
+
+@Service
+public class AIChatService {
+
+    private static final Logger log = LoggerFactory.getLogger(AIChatService.class);
+
+    private final ChatClient chatClient;
+
+    private final PromptTemplate deepThinkPromptTemplate;
+
+    private final ReasoningContentAdvisor reasoningContentAdvisor;
+
+    private final VectorStoreDelegate vectorStoreDelegate;
+
+    public AIChatService(
+            @Qualifier("mysqlDataSource") DataSource mysqlDataSource,
+            @Value("${spring.ai.dashscope.api-key}") String dashscopeApiKey,
+            @Qualifier("askSystemPromptTemplate") PromptTemplate systemPromptTemplate,
+            @Qualifier("deepThinkPromptTemplate") PromptTemplate deepThinkPromptTemplate,
+            VectorStoreDelegate vectorStoreDelegate
+    ) {
+        // 构造 ChatMemoryRepository 和 ChatMemory
+        ChatMemoryRepository chatMemoryRepository = MysqlChatMemoryRepository.mysqlBuilder()
+                .jdbcTemplate(new JdbcTemplate(mysqlDataSource))
+                .build();
+        ChatMemory chatMemory = MessageWindowChatMemory.builder()
+                .chatMemoryRepository(chatMemoryRepository)
+                .build();
+
+        DashScopeApi dashScopeApi = DashScopeApi.builder()
+                .apiKey(dashscopeApiKey)
+                .build();
+
+        ChatModel chatModel = DashScopeChatModel.builder()
+                .dashScopeApi(dashScopeApi)
+                .build();
+        this.chatClient = ChatClient.builder(chatModel)
+                .defaultSystem(
+                        systemPromptTemplate.getTemplate()
+                ).defaultAdvisors(new SimpleLoggerAdvisor())
+                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
+                .build();
+
+        this.deepThinkPromptTemplate = deepThinkPromptTemplate;
+        this.reasoningContentAdvisor = new ReasoningContentAdvisor(1);
+        this.vectorStoreDelegate = vectorStoreDelegate;
+    }
+
+    public Flux<String> chat(String chatId, String model, String prompt) {
+
+        log.debug("chat model is: {}", model);
+
+        // check if model == "deepseek-r1", output reasoning content.
+        if (Objects.equals("deepseek-r1", model)) {
+            // add reasoning content advisor.
+            chatClient.prompt().advisors(reasoningContentAdvisor);
+        }
+        var runtimeOptions = DashScopeChatOptions.builder()
+                .withModel(model)
+                .withTemperature(0.8)
+                .withResponseFormat(DashScopeResponseFormat.builder()
+                        .type(DashScopeResponseFormat.Type.TEXT)
+                        .build()
+                ).build();
+
+        return chatClient.prompt()
+                .options(runtimeOptions)
+                .user(prompt)
+                .advisors(memoryAdvisor -> memoryAdvisor
+                        .param(ChatMemory.CONVERSATION_ID, chatId)
+                ).advisors(
+                        QuestionAnswerAdvisor
+                                .builder(vectorStoreDelegate.getVectorStore("redis"))
+                                .searchRequest(
+                                        SearchRequest.builder()
+                                                // TODO all documents retrieved from ADB are under 0.1
+//												.similarityThreshold(0.6d)
+                                                .topK(6)
+                                                .build()
+                                )
+                                .build()
+                )
+                .stream()
+                .content();
+    }
+
+    public Flux<String> deepThinkingChat(String chatId, String model, String prompt) {
+
+        return chatClient.prompt()
+                .options(DashScopeChatOptions.builder()
+                        .withModel(model)
+                        .withTemperature(0.8)
+                        .withResponseFormat(DashScopeResponseFormat.builder()
+                                .type(DashScopeResponseFormat.Type.TEXT)
+                                .build()
+                        ).build()
+                ).system(deepThinkPromptTemplate.getTemplate())
+                .user(prompt)
+                .advisors(memoryAdvisor -> memoryAdvisor
+                        .param(ChatMemory.CONVERSATION_ID, chatId)
+                ).stream()
+                .content();
+    }
+}
