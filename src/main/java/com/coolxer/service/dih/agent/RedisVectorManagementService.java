@@ -140,7 +140,7 @@ public class RedisVectorManagementService extends BaseVectorStoreService {
      * TODO NOTE: 测试使用，暂不考虑其他，通过接口进行初始化进去
      * <p>
      * 初始化数据库DDL 到redis vector store
-     * x-genie 项目应从配置文件中获取然后解析并加入redis vector store
+     * 项目应从配置文件中获取然后解析并加入redis vector store
      */
     public void schema() {
         List<TableInfoBO> tableInfoBOS = Lists.newArrayList();
