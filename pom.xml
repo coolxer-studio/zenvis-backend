@@ -32,8 +32,13 @@
         <spring-ai.version>1.1.0-M4</spring-ai.version>
         <spring-ai-alibaba.version>1.1.0.0-M4</spring-ai-alibaba.version>
         <spring-ai-alibaba-extensions.version>1.1.0.0-M4</spring-ai-alibaba-extensions.version>
-        <!-- 添加统一的jackson版本管理 -->
         <jackson.version>2.19.4</jackson.version>
+        <commons-compress.version>1.20</commons-compress.version>
+        <commons-codec.version>1.15</commons-codec.version>
+        <guava.version>30.1.1-jre</guava.version>
+        <clickhouse-jdbc.version>0.4.6</clickhouse-jdbc.version>
+        <classgraph.version>4.8.174</classgraph.version>
+        <proguard-base.version>7.1.0</proguard-base.version>
     </properties>
 
     <profiles>
@@ -187,7 +192,7 @@
         <dependency>
             <groupId>com.clickhouse</groupId>
             <artifactId>clickhouse-jdbc</artifactId>
-            <version>0.4.6</version>
+            <version>${clickhouse-jdbc.version}</version>
             <!-- use uber jar with all dependencies included, change classifier to http for smaller jar -->
             <classifier>all</classifier>
         </dependency>
@@ -214,13 +219,13 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-compress</artifactId>
-            <version>1.20</version>
+            <version>${commons-compress.version}</version>
         </dependency>
 
         <dependency>
             <groupId>io.github.classgraph</groupId>
             <artifactId>classgraph</artifactId>
-            <version>4.8.174</version> <!-- 使用最新版 -->
+            <version>${classgraph.version}</version>
         </dependency>
 
         <dependency>
@@ -258,7 +263,7 @@
         <dependency>
             <groupId>commons-codec</groupId>
             <artifactId>commons-codec</artifactId>
-            <version>1.15</version>
+            <version>${commons-codec.version}</version>
         </dependency>
 
 
@@ -272,14 +277,14 @@
         <dependency>
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
-            <version>30.1.1-jre</version>
+            <version>${guava.version}</version>
         </dependency>
 
         <!--proguard-->
         <dependency>
             <groupId>com.guardsquare</groupId>
             <artifactId>proguard-base</artifactId>
-            <version>7.1.0</version>
+            <version>${proguard-base.version}</version>
             <scope>runtime</scope>
         </dependency>
     </dependencies>
