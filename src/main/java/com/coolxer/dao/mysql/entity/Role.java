@@ -13,8 +13,6 @@ import lombok.experimental.Accessors;
 
 /**
  * 角色表
- *
- * @author hunter
  */
 
 @Data

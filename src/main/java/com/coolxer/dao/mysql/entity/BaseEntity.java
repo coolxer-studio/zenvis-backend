@@ -13,8 +13,6 @@ import java.util.Date;
 
 /**
  * 实体通用属性
- *
- * @author hunter
  */
 @Data
 @Accessors(chain = true)

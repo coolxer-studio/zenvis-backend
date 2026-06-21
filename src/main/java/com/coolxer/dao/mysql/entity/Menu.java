@@ -16,8 +16,6 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 /**
  * 菜单表
- *
- * @author hunter
  */
 
 @Data

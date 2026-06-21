@@ -13,8 +13,6 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 /**
  * 用户角色关系表
- *
- * @author hunter
  */
 
 @Data

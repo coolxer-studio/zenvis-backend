@@ -11,8 +11,6 @@ import lombok.experimental.Accessors;
 
 /**
  * 角色权限表
- *
- * @author hunter
  */
 
 @Data
