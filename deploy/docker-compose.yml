@@ -1,0 +1,179 @@
+version: '3.8'
+
+services:
+  redis-service:
+    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/redis:6.2.6
+    container_name: redis-signal
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - 6379:6379
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./config/redis/redis.conf:/usr/local/redis/redis.conf
+      - ./data/redis/data:/data
+    command:
+      redis-server /usr/local/redis/redis.conf
+    restart: always
+    networks:
+      - zenvis-network
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  redis-stack-service:
+    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/redis-stack-server:7.2.0-v18
+    container_name: redis-stack-signal
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - 16379:6379
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./config/redis-stack/redis-stack.conf:/etc/redis-stack.conf
+      - ./data/redis-stack/data:/data
+    command:
+      redis-server /etc/redis-stack.conf
+    restart: always
+    networks:
+      - zenvis-network
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  mysql-service:
+    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/mysql:8.0.20
+    container_name: mysql8
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: uEPYrBanWaRJhCKHy3FP
+    ports:
+      - 3306:3306
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./data/mysql/data:/var/lib/mysql:rw
+      - ./config/mysql/my.cnf:/etc/mysql/conf.d/my.cnf
+      - ./config/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: always
+    networks:
+      - zenvis-network
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-puEPYrBanWaRJhCKHy3FP" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  clickhouse-service:
+    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/clickhouse:22.8.16
+    container_name: clickhouse-service
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+      - "9009:9009"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./config/clickhouse/config.xml:/etc/clickhouse-server/config.d/config.xml
+      - ./config/clickhouse/users.xml:/etc/clickhouse-server/users.xml
+      - ./data/clickhouse/logs:/var/log/clickhouse-server
+      - ./data/clickhouse/data:/var/lib/clickhouse
+    restart: unless-stopped
+    networks:
+      - zenvis-network
+    healthcheck:
+      test: [ "CMD", "clickhouse-client", "--user", "default", "--password", "SFGEfSVVMcUHCBCjKmzJ", "--query", "SELECT 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  zenvis-frontend:
+    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/zenvis-frontend:latest
+    container_name: zenvis-frontend
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "11000:11000"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./config/zenvis-frontend/conf.d:/etc/nginx/conf.d
+    restart: always
+    depends_on:
+      - zenvis-backend
+    networks:
+      - zenvis-network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:11000" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  zenvis-backend:
+    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/zenvis-backend:latest
+    container_name: zenvis-backend
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "11001:11001"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./config/zenvis-backend/config/application.properties:/app/application.properties
+      - ./open_config:/config/open_config
+    restart: always
+    depends_on:
+      redis-service:
+        condition: service_healthy
+      redis-stack-service:
+        condition: service_healthy
+      mysql-service:
+        condition: service_healthy
+      clickhouse-service:
+        condition: service_healthy
+    networks:
+      - zenvis-network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:11001/api/v1/system/about/info" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  vectum-service:
+    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/vectum:latest
+    container_name: vectum-service
+    ports:
+      - "11002:11002"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./data/vectum/workspace:/workspace
+      - ./data/vectum/vector:/var/lib/vector
+    environment:
+      TZ: Asia/Shanghai
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:11002/actuator/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+networks:
+  zenvis-network:
+    driver: bridge
+
+volumes:
+  mysql-data:
+    driver: local
+  clickhouse-data:
+    driver: local
+  clickhouse-logs:
+    driver: local

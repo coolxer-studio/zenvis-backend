@@ -1,0 +1,200 @@
+{
+  "type": "page",
+  "title": "看板管理",
+  "remark": null,
+  "toolbar": [
+    {
+      "type": "button",
+      "actionType": "dialog",
+      "label": "创建看板",
+      "primary": true,
+      "dialog": {
+        "title": "创建看板",
+        "mode": "horizontal",
+        "body": {
+          "type": "form",
+          "api": "/zenvis/api/v1/system/dashboard/add",
+          "body": [
+            {
+              "label": "看板名称",
+              "name": "name",
+              "type": "input-text",
+              "required": true
+            },
+            {
+              "label": "路由编码",
+              "name": "code",
+              "type": "input-text",
+              "required": true
+            },
+            {
+              "label": "看板类型",
+              "name": "type",
+              "type": "select",
+              "required": true,
+              "source": "/zenvis/api/v1/system/dashboard/type/list"
+            },
+            {
+              "type": "input-text",
+              "label": "外链",
+              "name": "url",
+              "required": true,
+              "hiddenOn": "data.type != 'LINK'"
+            },
+            {
+              "type": "input-text",
+              "label": "配置索引",
+              "name": "config_index",
+              "required": true,
+              "hiddenOn": "data.type != 'LOW_CODE_PAGE'"
+            },
+            {
+              "type": "input-text",
+              "label": "页面路径",
+              "name": "html_path",
+              "required": true,
+              "hiddenOn": "data.type != 'HTML_PAGE'"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "body": [
+    {
+      "type": "crud",
+      "api": "/zenvis/api/v1/system/dashboard/list",
+      "autoGenerateFilter": true,
+      "columns": [
+        {
+          "name": "id",
+          "label": "ID",
+          "type": "text",
+          "toggled": true
+        },
+        {
+          "name": "name",
+          "label": "看板名称",
+          "type": "text",
+          "searchable": true,
+          "toggled": true
+        },
+        {
+          "name": "type_description",
+          "label": "看板类型",
+          "type": "mapping",
+          "map": {
+            "内置看板": "<span class='label label-info'>${type_description}</span>",
+            "外链看板": "<span class='label label-success'>${type_description}</span>",
+            "*": "<span class='label label-default'>${type_description}</span>"
+          },
+          "toggled": true
+        },
+        {
+          "name": "code",
+          "label": "路由编码",
+          "type": "text",
+          "toggled": true
+        },
+        {
+          "name": "url",
+          "label": "外链地址",
+          "type": "text",
+          "searchable": true,
+          "toggled": true
+        },
+        {
+          "name": "config_index",
+          "label": "配置索引",
+          "type": "text",
+          "searchable": true,
+          "toggled": true
+        },
+        {
+          "name": "html_path",
+          "label": "页面路径",
+          "type": "text",
+          "searchable": true,
+          "toggled": true
+        },
+        {
+          "name": "update_time",
+          "label": "更新时间",
+          "type": "text",
+          "toggled": true
+        },
+        {
+          "type": "operation",
+          "label": "操作",
+          "width": 100,
+          "buttons": [
+            {
+              "type": "button",
+              "icon": "fa fa-pencil",
+              "actionType": "dialog",
+              "dialog": {
+                "size": "lg",
+                "title": "编辑",
+                "body": {
+                  "type": "form",
+                  "name": "sample-edit-form",
+                  "api": "/zenvis/api/v1/system/dashboard/$id/update",
+                  "body": [
+                    {
+                      "label": "看板名称",
+                      "name": "name",
+                      "type": "input-text",
+                      "required": true
+                    },
+                    {
+                      "label": "路由编码",
+                      "name": "code",
+                      "type": "input-text",
+                      "required": true
+                    },
+                    {
+                      "label": "看板类型",
+                      "name": "type",
+                      "type": "select",
+                      "required": true,
+                      "source": "/zenvis/api/v1/system/dashboard/type/list"
+                    },
+                    {
+                      "type": "input-text",
+                      "label": "外链",
+                      "name": "url",
+                      "required": true,
+                      "hiddenOn": "data.type != 'LINK'"
+                    },
+                    {
+                      "type": "input-text",
+                      "label": "配置索引",
+                      "name": "config_index",
+                      "required": true,
+                      "hiddenOn": "data.type != 'LOW_CODE_PAGE'"
+                    },
+                    {
+                      "type": "input-text",
+                      "label": "页面路径",
+                      "name": "html_path",
+                      "required": true,
+                      "hiddenOn": "data.type != 'HTML_PAGE'"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "type": "button",
+              "icon": "fa fa-times text-danger",
+              "actionType": "ajax",
+              "confirmText": "您确认要删除?",
+              "api": "delete:/zenvis/api/v1/system/dashboard/$id"
+            }
+          ],
+          "toggled": true
+        }
+      ]
+    }
+  ]
+}
