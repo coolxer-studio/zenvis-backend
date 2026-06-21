@@ -70,8 +70,9 @@ public class LogAopAspect {
 
         }
 
-        log.info("请求的参数: {}", JacksonUtil.toJson(arguments));
-
+        if (log.isInfoEnabled()) {
+            log.info("请求的参数: {}", JacksonUtil.toJson(arguments));
+        }
     }
 
     @AfterReturning(returning = "ret", pointcut = "logAspect()")
