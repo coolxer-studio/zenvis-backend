@@ -7,8 +7,6 @@ import java.util.List;
 
 /**
  * 配置常量
- *
- * @author hunter
  */
 public class ConfigConstants {
 

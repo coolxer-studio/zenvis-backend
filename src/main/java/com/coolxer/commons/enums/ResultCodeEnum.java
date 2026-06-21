@@ -4,8 +4,6 @@ import lombok.Getter;
 
 /**
  * 接口结果返回码枚举类
- *
- * @author hunter
  */
 @Getter
 public enum ResultCodeEnum {
@@ -24,6 +22,11 @@ public enum ResultCodeEnum {
      * 服务器内部错误
      */
     INNER_ERROR(1, "请求失败"),
+
+    /**
+     * 不支持的操作
+     */
+    NO_SUPPORTED(99, "不支持的操作！"),
 
     /**
      * 您没有权限进行此操作
@@ -121,6 +124,16 @@ public enum ResultCodeEnum {
     INVALID_TIME(131, "无效的时间！"),
 
     /**
+     * 文件名无效
+     */
+    FILE_NAME_INVALID(128, "文件名无效"),
+
+    /**
+     * 文件写入失败
+     */
+    FILE_WRITE_FAIL(129, "文件写入失败！"),
+
+    /**
      * 开始时间不能超过结束时间
      */
     START_TIME_CANNOT_EXCEED_END_TIME(132, "开始时间不能超过结束时间！"),
@@ -159,6 +172,7 @@ public enum ResultCodeEnum {
      * 密码不能为空
      */
     PASSWORD_MUST_NOT_NULL(146, "密码不能为空"),
+
     /**
      * 原密码不能为空
      */
@@ -188,13 +202,17 @@ public enum ResultCodeEnum {
 
     DASHBOARD_IS_NOT_EXIST(182, "看板不存在"),
 
+    ENTITY_IS_EMPTY(190, "无可用实体"),
 
     PLUGIN_IS_INSTALLED(201, "插件已经安装，当前操作不允许！"),
+
     PLUGIN_IS_UNINSTALL(202, "插件未安装，当前操作不允许！"),
+
     PLUGIN_IS_EXIST(203, "相同插件已经存在！"),
 
 
     FIELD_IS_EMPTY(301, "必填字段不能为空"),
+
     FIELD_NOT_CANDIDATE(302, "字段不在备选值范围");
 
 

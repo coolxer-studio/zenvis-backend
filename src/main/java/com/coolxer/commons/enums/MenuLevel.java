@@ -5,8 +5,6 @@ import lombok.Getter;
 /**
  * 菜单类型
  * 低代码应用、配置文件、内置应用。
- *
- * @author hunter
  */
 @Getter
 public enum MenuLevel {

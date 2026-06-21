@@ -11,8 +11,6 @@ import java.util.stream.Collectors;
 /**
  * 资产类型
  * 服务器设备、移动端设备、PC端设备、IOT设备、探针资产、应用资产、服务资产、API资产、日志、文件
- *
- * @author hunter
  */
 @Getter
 public enum Asset {
