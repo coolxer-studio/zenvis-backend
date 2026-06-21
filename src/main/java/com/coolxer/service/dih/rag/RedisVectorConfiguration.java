@@ -51,7 +51,7 @@ public class RedisVectorConfiguration {
     /**
      * 为Agent单独创建一个向量数据库，索引单独拆开
      *
-     * @param jedisPooled 与 #vectorStore 共用一个jedis 链接
+     * @param jedisPooled    与 #vectorStore 共用一个jedis 链接
      * @param embeddingModel dashscope embedding model
      * @return
      */

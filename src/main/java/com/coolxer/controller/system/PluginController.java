@@ -48,6 +48,7 @@ public class PluginController extends BaseController {
             PluginVo pluginVo = pluginService.uploadFile(file);
             return ResponseWrap.success(pluginVo);
         } catch (Exception e) {
+            log.error(e.getMessage(), e);
             return ResponseWrap.fail(e);
         }
     }

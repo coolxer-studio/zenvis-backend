@@ -138,12 +138,12 @@ public class SystemInfoServiceImpl implements SystemInfoService {
             throw new ApiException(ResultCodeEnum.FILE_NAME_INVALID);
         }
         // 确保目录存在
-        File directory = new File(customWebConfig.getSystemInfoPath());
+        File directory = new File(customWebConfig.getSystemConfigPath());
         if (!directory.exists()) {
             directory.mkdirs();
         }
         // 保存文件到sysInfoPath路径下
-        Path filePath = Paths.get(customWebConfig.getSystemInfoPath(), fileName);
+        Path filePath = Paths.get(customWebConfig.getSystemConfigPath(), fileName);
         try {
             Files.write(filePath, file.getBytes());
         } catch (IOException e) {

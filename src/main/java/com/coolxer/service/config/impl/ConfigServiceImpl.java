@@ -129,14 +129,19 @@ public class ConfigServiceImpl implements ConfigService {
                     break;
             }
             if (schemaFile != null) {
-                // 直接通过ClassLoader获取资源流，避免URI到Path再到File的转换
-                try (java.io.InputStream inputStream = getClass().getClassLoader().getResourceAsStream(schemaFile)) {
-                    if (inputStream == null) {
-                        log.error("Schema file not found: {}", schemaFile);
-                        return null;
-                    }
-                    return org.apache.commons.io.IOUtils.toString(inputStream, StandardCharsets.UTF_8);
-                }
+                // 读取schema文件内容
+                Path filePath = Paths.get(customWebConfig.getSystemConfigPath(), schemaFile);
+                return FileUtils.readFileToString(filePath.toFile(), StandardCharsets.UTF_8);
+                // （暂时废弃）直接通过ClassLoader获取资源流，避免URI到Path再到File的转换
+                /**
+                 try (java.io.InputStream inputStream = getClass().getClassLoader().getResourceAsStream(schemaFile)) {
+                 if (inputStream == null) {
+                 log.error("Schema file not found: {}", schemaFile);
+                 return null;
+                 }
+                 return org.apache.commons.io.IOUtils.toString(inputStream, StandardCharsets.UTF_8);
+                 }
+                 */
             }
         } catch (Exception e) {
             log.error("read config file schema failed !", e);
