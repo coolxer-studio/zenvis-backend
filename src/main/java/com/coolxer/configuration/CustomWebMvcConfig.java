@@ -33,7 +33,8 @@ public class CustomWebMvcConfig implements WebMvcConfigurer {
                         "/risk_index/**",
                         "/index.html",
                         "/static/**",
-                        "/system-files/**"
+                        "/system-files/**",
+                        "/actuator/**"
                 );
 
     }
