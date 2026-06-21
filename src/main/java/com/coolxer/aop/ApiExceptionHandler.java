@@ -12,8 +12,6 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 
 /**
  * 统一异常处理
- *
- * @author hunter
  */
 @Slf4j
 @ControllerAdvice

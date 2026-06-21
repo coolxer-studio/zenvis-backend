@@ -21,8 +21,6 @@ import java.util.Objects;
 
 /**
  * 请求拦截器
- *
- * @author hunter
  */
 @Slf4j
 @Aspect
