@@ -11,8 +11,8 @@ import com.coolxer.model.retrieval.vo.AggregateMsgInfoVo;
 import com.coolxer.model.retrieval.vo.DataMsgVo;
 import com.coolxer.service.retrieval.AggregateService;
 import com.coolxer.utils.DateUtil;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -26,7 +26,7 @@ import java.util.Map;
 /**
  * 数据检索
  */
-@Api
+@Tag(name = "数据检索")
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/retrieval/aggregate")
@@ -48,7 +48,7 @@ public class AggregateController extends BaseController {
      * @return 结果
      */
     @GetMapping(value = "/msg/tag")
-    @ApiOperation(value = "msg基础数据标签", notes = "msg基础数据标签")
+    @Operation(summary = "msg基础数据标签", description = "msg基础数据标签")
     public ResponseWrap<AggregateMsgInfoVo> msgTag(@RequestParam Map<String, String> params) {
         // 验证必需参数
         if (params == null || params.isEmpty()) {
@@ -64,7 +64,7 @@ public class AggregateController extends BaseController {
      * @return 结果
      */
     @GetMapping(value = "/msg/trend")
-    @ApiOperation(value = "数据分布", notes = "数据分布")
+    @Operation(summary = "数据分布", description = "数据分布")
     public ResponseWrap<StackedLineChartVo> msgTrend(@RequestParam Map<String, String> params) {
         // 验证必需参数
         if (params == null || params.isEmpty()) {
@@ -82,7 +82,7 @@ public class AggregateController extends BaseController {
 //     * @return 结果
 //     */
 //    @GetMapping(value = "/info")
-//    @ApiOperation(value = "设备详情", notes = "设备详情")
+//    @Operation(summary = "设备详情", description = "设备详情")
 //    public ResponseWrap<DeviceInfoVo> info(@RequestParam(value = "id") String id, @RequestParam(value = "start_time") @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") Date startTime, @RequestParam(value = "end_time") @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") Date endTime) {
 //
 //        // 1
@@ -140,7 +140,7 @@ public class AggregateController extends BaseController {
      * @return 结果
      */
     @PostMapping(value = "/detail/{id}")
-    @ApiOperation(value = "数据链列表", notes = "数据链列表")
+    @Operation(summary = "数据链列表", description = "数据链列表")
     public ResponseWrap<PageView<DataMsgVo>> searchDetailByPage(@PathVariable("id") String id, @RequestBody BaseQueryDto baseQueryDto) {
 
         Page<Map<String, Object>> msgPage = msgRepository.findByPage(PageRequest.of(baseQueryDto.getPage() - 1, baseQueryDto.getSize()), id, baseQueryDto.getStartTime(), baseQueryDto.getEndTime());

@@ -6,7 +6,7 @@ import com.coolxer.model.base.vo.PageRowsVo;
 import com.coolxer.model.base.vo.ResponseWrap;
 import com.coolxer.service.retrieval.EntityCoreService;
 import com.coolxer.utils.CommonUtil;
-import io.swagger.annotations.Api;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -18,7 +18,7 @@ import java.util.Map;
 /**
  * 实体的通用接口-默认生成
  */
-@Api
+@Tag(name = "实体的通用接口")
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/entity/{entity}/")

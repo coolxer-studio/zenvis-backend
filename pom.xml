@@ -19,7 +19,7 @@
         <proguard.version>7.2.1</proguard.version>
         <proguard-maven-plugin.version>2.5.3</proguard-maven-plugin.version>
         <kaptcha.version>2.3.2</kaptcha.version>
-        <swagger.version>3.0.0</swagger.version>
+        <springdoc.version>2.3.0</springdoc.version>
         <commons-io.version>2.11.0</commons-io.version>
         <redisson-spring-boot-starter.version>3.20.1</redisson-spring-boot-starter.version>
         <commons-lang3.version>3.12.0</commons-lang3.version>
@@ -246,15 +246,9 @@
 
         <!-- swagger doc -->
         <dependency>
-            <groupId>io.springfox</groupId>
-            <artifactId>springfox-boot-starter</artifactId>
-            <version>${swagger.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>io.springfox</groupId>
-            <artifactId>springfox-swagger-ui</artifactId>
-            <version>${swagger.version}</version>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>${springdoc.version}</version>
         </dependency>
 
         <dependency>

@@ -11,7 +11,7 @@ import com.coolxer.model.business.asset.dto.AssetRuleSearchDto;
 import com.coolxer.model.business.asset.vo.AssetRuleVo;
 import com.coolxer.service.business.asset.AssetRuleService;
 import com.coolxer.utils.CommonUtil;
-import io.swagger.annotations.Api;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,7 +26,7 @@ import java.util.Map;
 /**
  * 看板管理
  */
-@Api
+@Tag(name = "看板管理")
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/asset/rule")

@@ -10,8 +10,8 @@ import com.coolxer.model.system.vo.PubKeyVo;
 import com.coolxer.service.system.LoginService;
 import com.coolxer.utils.RsaUtils;
 import com.google.code.kaptcha.impl.DefaultKaptcha;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -31,7 +31,7 @@ import java.time.Duration;
 /**
  * 登录
  */
-@Api
+@Tag(name = "登录")
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/system/login")
@@ -57,7 +57,7 @@ public class LoginController extends BaseController {
      * @return 结果
      */
     @PostMapping(value = "/sign-in")
-    @ApiOperation(value = "用户登录", notes = "用于用户登录")
+    @Operation(summary = "用户登录", description = "用于用户登录")
     public ResponseWrap<LoginVo> login(@RequestBody LoginDto loginDto) {
         // 检测验证码
         loginService.checkAuthCode(loginDto.getAuthCode(), request);
@@ -77,7 +77,7 @@ public class LoginController extends BaseController {
      * @throws IOException io异常
      */
     @GetMapping(value = "/kaptcha")
-    @ApiOperation(value = "验证码", notes = "用于生成验证码")
+    @Operation(summary = "验证码", description = "用于生成验证码")
     public String kaptCha(HttpServletRequest request, HttpServletResponse response)
             throws IOException {
         //生产验证码字符串并保存到session中
@@ -98,7 +98,7 @@ public class LoginController extends BaseController {
      * 返回用来做密码传输加密的公钥key.
      */
     @GetMapping(value = "/encrypt/key")
-    @ApiOperation(value = "公钥接口", notes = "返回用来做密码传输加密的公钥key")
+    @Operation(summary = "公钥接口", description = "返回用来做密码传输加密的公钥key")
     public ResponseWrap<PubKeyVo> encryptKey() {
         PubKeyVo pubKeyVo = new PubKeyVo();
         pubKeyVo.setKey(RsaUtils.PUB_KY);
@@ -109,7 +109,7 @@ public class LoginController extends BaseController {
      * 退出登录接口.
      */
     @PostMapping(value = "/sign-out")
-    @ApiOperation(value = "退出接口", notes = "退出登录接口")
+    @Operation(summary = "退出接口", description = "退出登录接口")
     public ResponseWrap<Void> logout(HttpServletRequest request, HttpServletResponse response) {
         String sessionId = request.getRequestedSessionId();
         if (StringUtils.isEmpty(sessionId)) {

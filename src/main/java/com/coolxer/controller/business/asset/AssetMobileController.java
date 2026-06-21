@@ -9,7 +9,7 @@ import com.coolxer.model.business.asset.dto.AssetMobileSearchDto;
 import com.coolxer.model.business.asset.vo.AssetMobileVo;
 import com.coolxer.service.business.asset.AssetMobileService;
 import com.coolxer.utils.CommonUtil;
-import io.swagger.annotations.Api;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -21,7 +21,7 @@ import java.util.Map;
 /**
  * 资产管理-移动端
  */
-@Api
+@Tag(name = "资产管理-移动端")
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/asset/mobile")

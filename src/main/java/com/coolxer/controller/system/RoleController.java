@@ -13,7 +13,7 @@ import com.coolxer.service.system.MenuService;
 import com.coolxer.service.system.PermissionTreeService;
 import com.coolxer.service.system.RoleService;
 import com.coolxer.utils.CommonUtil;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -128,7 +128,7 @@ public class RoleController extends BaseController {
      * 角色列表
      */
     @GetMapping(value = "/type/list")
-    @ApiOperation(value = "全部角色列表", notes = "全部角色列表")
+    @Operation(summary = "全部角色列表", description = "全部角色列表")
     public ResponseWrap<?> listAllRoles() {
         try {
             Map<String, List<Map<String, String>>> result = new HashMap<>();
@@ -147,7 +147,7 @@ public class RoleController extends BaseController {
      * 全权限列表
      */
     @GetMapping(value = "/permission/tree")
-    @ApiOperation(value = "全权限列表", notes = "全权限列表")
+    @Operation(summary = "全权限列表", description = "全权限列表")
     public ResponseWrap<List<Tree<String>>> allPermissionTree() {
         return ResponseWrap.success(permissionTreeService.getPermissionTreeFromMenu(menuService.findAll()));
 

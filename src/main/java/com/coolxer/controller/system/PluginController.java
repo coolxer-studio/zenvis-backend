@@ -12,7 +12,7 @@ import com.coolxer.model.system.dto.PluginDto;
 import com.coolxer.model.system.dto.PluginSearchDto;
 import com.coolxer.model.system.vo.PluginVo;
 import com.coolxer.service.system.PluginService;
-import io.swagger.annotations.Api;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
@@ -31,7 +31,7 @@ import java.util.List;
 /**
  * 插件管理
  */
-@Api
+@Tag(name = "插件管理")
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/system/plugin")

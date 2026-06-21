@@ -5,8 +5,8 @@ import com.coolxer.model.base.vo.ResponseWrap;
 import com.coolxer.model.dih.SuggestDto;
 import com.coolxer.service.dih.AIBaseService;
 import com.coolxer.service.dih.AIGeneralCompleteService;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -17,7 +17,7 @@ import java.util.Map;
 /**
  * 数智中心
  */
-@Api
+@Tag(name = "数智中心")
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/dih")
@@ -36,7 +36,7 @@ public class DihController {
      * @return
      */
     @PostMapping(value = "/suggest")
-    @ApiOperation(value = "补全建议", notes = "补全建议")
+    @Operation(summary = "补全建议", description = "补全建议")
     public ResponseWrap<String> suggest(@RequestBody SuggestDto suggestDto) {
         try {
             String currentLine = suggestDto.getCurrentLine().substring(0, suggestDto.getCurrentLine().length() - 2);

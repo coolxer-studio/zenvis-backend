@@ -10,8 +10,8 @@ import com.coolxer.model.system.dto.UserDto;
 import com.coolxer.model.system.dto.UserSearchDto;
 import com.coolxer.model.system.vo.UserVo;
 import com.coolxer.service.system.UserService;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.*;
 /**
  * 用户管理
  */
-@Api
+@Tag(name = "用户管理")
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/system/user")
@@ -109,7 +109,7 @@ public class UserController extends BaseController {
      * @return 结果
      */
     @PostMapping(value = "/update-password")
-    @ApiOperation(value = "修改用户密码", notes = "修改用户密码")
+    @Operation(summary = "修改用户密码", description = "修改用户密码")
     public ResponseWrap<Void> updatePassword(@Valid @RequestBody PasswordChangeDto passwordChangeDto) {
 
         User opt = getSessionUser();

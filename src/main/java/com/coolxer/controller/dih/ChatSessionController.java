@@ -11,7 +11,7 @@ import com.coolxer.model.dih.dto.ChatSessionSearchDto;
 import com.coolxer.model.dih.vo.ChatSessionVo;
 import com.coolxer.service.dih.ChatSessionService;
 import com.coolxer.utils.DateUtil;
-import io.swagger.annotations.Api;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -22,7 +22,7 @@ import java.util.List;
 /**
  * 会话管理
  */
-@Api
+@Tag(name = "会话管理")
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/dih/chat-session")

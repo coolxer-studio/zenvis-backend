@@ -3,7 +3,7 @@ package com.coolxer.controller.business.risk;
 import com.coolxer.controller.BaseController;
 import com.coolxer.model.base.vo.ResponseWrap;
 import com.coolxer.service.business.operation.OperationBoardService;
-import io.swagger.annotations.Api;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,7 +19,7 @@ import java.util.*;
 /**
  * 看板管理
  */
-@Api
+@Tag(name = "看板管理")
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/risk")

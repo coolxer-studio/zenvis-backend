@@ -8,7 +8,7 @@ import com.coolxer.model.business.asset.dto.AssetLogDto;
 import com.coolxer.model.business.asset.dto.AssetLogSearchDto;
 import com.coolxer.model.business.asset.vo.AssetLogVo;
 import com.coolxer.service.business.asset.AssetLogService;
-import io.swagger.annotations.Api;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -23,7 +23,7 @@ import java.util.stream.Collectors;
 /**
  * 资产管理-日志资产
  */
-@Api
+@Tag(name = "资产管理-日志资产")
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/asset/log")

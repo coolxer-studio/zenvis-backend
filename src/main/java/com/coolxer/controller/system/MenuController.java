@@ -13,7 +13,7 @@ import com.coolxer.model.system.dto.MenuSearchDto;
 import com.coolxer.model.system.vo.MenuVo;
 import com.coolxer.service.system.MenuService;
 import com.coolxer.utils.CommonUtil;
-import io.swagger.annotations.Api;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,7 +27,7 @@ import java.util.Map;
 /**
  * 菜单管理
  */
-@Api
+@Tag(name = "菜单管理")
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/system/menu")

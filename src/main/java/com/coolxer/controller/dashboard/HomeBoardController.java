@@ -6,8 +6,8 @@ import com.coolxer.model.base.dto.BaseQueryDto;
 import com.coolxer.model.base.vo.ResponseWrap;
 import com.coolxer.model.dashboard.vo.*;
 import com.coolxer.service.dashboard.MsgChartService;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,7 +20,7 @@ import java.util.Objects;
 /**
  * chart图表接口
  */
-@Api
+@Tag(name = "chart图表接口")
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/dashboard/home")
@@ -35,7 +35,7 @@ public class HomeBoardController extends BaseController {
      * @return 结果
      */
     @PostMapping(value = "/speed-stat")
-    @ApiOperation(value = "速率表", notes = "速率表")
+    @Operation(summary = "速率表", description = "速率表")
     public ResponseWrap<SpeedVo> speedStat() {
         //返回数据
         return ResponseWrap.success(msgChartService.findSpeed());
@@ -47,7 +47,7 @@ public class HomeBoardController extends BaseController {
      * @return 结果
      */
     @PostMapping(value = "/summary")
-    @ApiOperation(value = "数据总计", notes = "数据总计")
+    @Operation(summary = "数据总计", description = "数据总计")
     public ResponseWrap<SummaryVo> summary(@RequestBody BaseQueryDto baseQueryDto) {
         if (Objects.isNull(baseQueryDto.getStartTime())) {
             ResponseWrap.fail(ResultCodeEnum.START_TIME_NOT_NULL);
@@ -65,7 +65,7 @@ public class HomeBoardController extends BaseController {
      * @return 结果
      */
     @PostMapping(value = "/status")
-    @ApiOperation(value = "状态结果", notes = "状态结果")
+    @Operation(summary = "状态结果", description = "状态结果")
     public ResponseWrap<StatusVo> status() {
         //返回数据
         return ResponseWrap.success(msgChartService.status());
@@ -77,7 +77,7 @@ public class HomeBoardController extends BaseController {
      * @return 结果
      */
     @PostMapping(value = "/efficiency")
-    @ApiOperation(value = "效率", notes = "效率")
+    @Operation(summary = "效率", description = "效率")
     public ResponseWrap<EfficiencyVo> efficiency() {
         //返回数据
         return ResponseWrap.success(msgChartService.efficiency());
@@ -90,7 +90,7 @@ public class HomeBoardController extends BaseController {
      * @return 结果
      */
     @PostMapping(value = "/real-info")
-    @ApiOperation(value = "实时信息", notes = "实时信息")
+    @Operation(summary = "实时信息", description = "实时信息")
     public ResponseWrap<RealInfoVo> realInfo() {
         //返回数据
         return ResponseWrap.success(msgChartService.realInfo());
@@ -103,7 +103,7 @@ public class HomeBoardController extends BaseController {
      * @return 结果
      */
     @PostMapping(value = "/province-city-stat")
-    @ApiOperation(value = "省-市地域分布", notes = "省-市地域分布")
+    @Operation(summary = "省-市地域分布", description = "省-市地域分布")
     public ResponseWrap<StackedBarChartVo> provinceCityStat(@RequestBody BaseQueryDto baseQueryDto) {
 
         if (Objects.isNull(baseQueryDto.getStartTime())) {
@@ -123,7 +123,7 @@ public class HomeBoardController extends BaseController {
      * @return 结果
      */
     @PostMapping(value = "/manufacture-system-stat")
-    @ApiOperation(value = "厂商-操作系统分布", notes = "厂商-操作系统分布")
+    @Operation(summary = "厂商-操作系统分布", description = "厂商-操作系统分布")
     public ResponseWrap<StackedBarChartVo> manufactureSystemStat(@RequestBody BaseQueryDto baseQueryDto) {
 
         if (Objects.isNull(baseQueryDto.getStartTime())) {
@@ -143,7 +143,7 @@ public class HomeBoardController extends BaseController {
      * @return 结果
      */
     @PostMapping(value = "/msg-trend")
-    @ApiOperation(value = "数据分布", notes = "数据分布")
+    @Operation(summary = "数据分布", description = "数据分布")
     public ResponseWrap<StackedLineChartVo> msgTrend(@RequestBody BaseQueryDto baseQueryDto) {
 
         if (Objects.isNull(baseQueryDto.getStartTime())) {

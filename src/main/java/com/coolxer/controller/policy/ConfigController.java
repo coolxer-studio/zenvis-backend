@@ -7,8 +7,8 @@ import com.coolxer.model.policy.dto.ConfigDto;
 import com.coolxer.model.policy.vo.ConfigVo;
 import com.coolxer.service.config.ConfigService;
 import com.coolxer.utils.JacksonUtil;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,7 +19,7 @@ import java.util.List;
 /**
  * 策略配置
  */
-@Api
+@Tag(name = "策略配置")
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/config/{type}")
@@ -37,7 +37,7 @@ public class ConfigController {
      * @return 结果
      */
     @GetMapping(value = "/tree")
-    @ApiOperation(value = "文件树", notes = "配置文件树")
+    @Operation(summary = "文件树", description = "配置文件树")
     public ResponseWrap<List<ConfigVo>> getConfigFileTree(@PathVariable("type") String type) {
         return ResponseWrap.success(configService.getConfigFileTree(type));
     }
@@ -49,7 +49,7 @@ public class ConfigController {
      * @return 文件内容
      */
     @GetMapping(value = "/schema")
-    @ApiOperation(value = "获取文件schema", notes = "获取文件scheme")
+    @Operation(summary = "获取文件schema", description = "获取文件scheme")
     public ResponseWrap<Object> scheme(@PathVariable("type") String type, @RequestParam(value = "file_name") String fileName) {
         String schema = configService.readFileSchema(type, fileName);
         Object jsonObject = JacksonUtil.toObject(schema, Object.class);
@@ -63,7 +63,7 @@ public class ConfigController {
      * @return 文件内容
      */
     @GetMapping(value = "/read")
-    @ApiOperation(value = "读文件", notes = "读文件")
+    @Operation(summary = "读文件", description = "读文件")
     public ResponseWrap<String> readFile(@PathVariable("type") String type, @RequestParam(value = "file_name") String fileName) {
         if (configService.fileExistsInConfigPath(type, fileName)) {
             return ResponseWrap.success(configService.readFile(type, fileName));
@@ -78,7 +78,7 @@ public class ConfigController {
      * @return 配置文件内容，不包含包装数据
      */
     @GetMapping(value = "/get")
-    @ApiOperation(value = "获取配置", notes = "获取配置")
+    @Operation(summary = "获取配置", description = "获取配置")
     public Object getConfig(@PathVariable("type") String type, @RequestParam(value = "file_name") String fileName) {
         if (configService.fileExistsInConfigPath(type, fileName)) {
             return configService.readFile(type, fileName);
@@ -93,7 +93,7 @@ public class ConfigController {
      * @return 结果
      */
     @PostMapping(value = "/modify")
-    @ApiOperation(value = "修改文件", notes = "修改文件")
+    @Operation(summary = "修改文件", description = "修改文件")
     public ResponseWrap<Void> modify(@PathVariable("type") String type, @Valid @RequestBody ConfigDto configDto) {
         if (configService.fileExistsInConfigPath(type, configDto.getFileName())) {
             configService.modifyConfig(type, configDto);
@@ -109,7 +109,7 @@ public class ConfigController {
      * @return 结果
      */
     @PostMapping(value = "/apply")
-    @ApiOperation(value = "应用配置", notes = "应用配置")
+    @Operation(summary = "应用配置", description = "应用配置")
     public ResponseWrap<Void> apply(@PathVariable("type") String type, @RequestBody ConfigDto configDto) {
         if (configService.fileExistsInConfigPath(type, configDto.getFileName())) {
             // 先保存
@@ -129,7 +129,7 @@ public class ConfigController {
      * @return
      */
     @PostMapping(value = "/add")
-    @ApiOperation(value = "添加文件", notes = "添加文件")
+    @Operation(summary = "添加文件", description = "添加文件")
     public ResponseWrap<String> addFile(@PathVariable("type") String type, @RequestBody ConfigDto configDto) {
         if (configService.fileExistsInConfigPath(type, configDto.getFileName())) {
             return ResponseWrap.fail(ResultCodeEnum.NO_AUTHORITY);
@@ -149,7 +149,7 @@ public class ConfigController {
      * @return
      */
     @PostMapping(value = "/rename")
-    @ApiOperation(value = "修改文件名", notes = "修改文件名")
+    @Operation(summary = "修改文件名", description = "修改文件名")
     public ResponseWrap<String> renameFile(@PathVariable("type") String type, @RequestBody ConfigDto configDto) {
         if (configService.fileExistsInConfigPath(type, configDto.getOriginalFileName())) {
             if (configService.renameFile(type, configDto.getOriginalFileName(), configDto.getFileName())) {
@@ -169,7 +169,7 @@ public class ConfigController {
      * @return
      */
     @PostMapping(value = "/delete")
-    @ApiOperation(value = "文件名", notes = "文件名")
+    @Operation(summary = "文件名", description = "文件名")
     public ResponseWrap<String> deleteFile(@PathVariable("type") String type, @RequestBody ConfigDto configDto) {
         if (configService.fileExistsInConfigPath(type, configDto.getFileName())) {
             if (configService.deleteFile(type, configDto.getFileName())) {
