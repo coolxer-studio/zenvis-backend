@@ -16,8 +16,6 @@ import java.util.Optional;
 
 /**
  * jpa 审计功能提供记录着
- *
- * @author hunter
  */
 @Slf4j
 @Configuration

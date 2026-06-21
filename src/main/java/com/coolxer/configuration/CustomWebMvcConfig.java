@@ -41,9 +41,12 @@ public class CustomWebMvcConfig implements WebMvcConfigurer {
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         // 配置系统信息文件访问路径
-        // 前端可以通过 /system-files/{filename} 访问 sysInfoPath 目录下的文件
+        // 前端可以通过 /system-files/{filename} 访问 sysInfoPath 目录下的文件,主要存放系统图标
         registry.addResourceHandler("/system-files/**")
-                .addResourceLocations("file:" + customWebConfig.getSysInfoPath() + "/");
+                .addResourceLocations("file:" + customWebConfig.getSystemConfigPath() + "/");
+        // 前端可以通过 /html-page/{filename} 访问 html-page 目录下的文件,主要存放静态页面
+        registry.addResourceHandler("/html-page/**")
+                .addResourceLocations("file:" + customWebConfig.getHtmlPagePath() + "/");
     }
 
 }

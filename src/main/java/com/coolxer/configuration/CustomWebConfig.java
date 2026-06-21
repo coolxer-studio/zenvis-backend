@@ -1,16 +1,16 @@
 package com.coolxer.configuration;
 
+import jakarta.annotation.PostConstruct;
 import lombok.Getter;
 import lombok.ToString;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Repository;
 
+import java.io.File;
 import java.time.Duration;
 
 /**
  * 加载配置参数
- *
- * @author hunter
  */
 @Repository
 @Getter
@@ -18,39 +18,62 @@ import java.time.Duration;
 public class CustomWebConfig {
 
     /**
-     * 系统插件目录
+     * DIH会话工作空间目录
      */
-    @Value("${dih.session.path}")
-    private String dihSessionPath;
+    @Value("${app.paths.session.workspace}")
+    private String sessionWorkspacePath;
 
     /**
      * 系统插件目录
      */
-    @Value("${system.plugin.path}")
-    private String sysPluginPath;
+    @Value("${app.paths.plugins}")
+    private String pluginPath;
 
     /**
      * 系统信息文件目录
      */
-    @Value("${system.info.path}")
-    private String sysInfoPath;
+    @Value("${app.paths.system.config}")
+    private String systemConfigPath;
 
     /**
-     * 配置树路径
+     * 静态页面存储路径
      */
-    @Value("${policy.config.path}")
+    @Value("${app.paths.html.pages}")
+    private String htmlPagePath;
+
+    /**
+     * 配置文件根目录
+     */
+    @Value("${app.paths.config.base}")
     private String configPath;
 
+    @PostConstruct
+    public void init() {
+        // 如果configPath是相对路径，转换为绝对路径
+        if (configPath != null && !configPath.isEmpty()) {
+            File configFile = new File(configPath);
+            if (configFile.exists() && !configFile.isAbsolute()) {
+                configPath = configFile.getAbsolutePath();
+            }
+        }
+    }
+
     /**
-     * 需要校验的路径
+     * 权限拦截器检查路径
      */
-    @Value("${authority.interceptor.check.path}")
+    @Value("${app.security.interceptor.check.path}")
     private String needCheckPath;
 
-    @Value("${retrieval.meta.path}")
+    /**
+     * 检索元数据文件路径
+     */
+    @Value("${app.paths.retrieval.metadata}")
     private String retrievalMetaFilePath;
 
-    @Value("${service.data.url}")
+    /**
+     * 数据服务URL
+     */
+    @Value("${app.services.data.url}")
     private String dataServiceUrl;
 
     @Value("${trend.data.size:12}")
