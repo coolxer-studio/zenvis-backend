@@ -1,9 +1,8 @@
 package com.coolxer.controller.dih;
 
-import com.alibaba.cloud.ai.dashscope.api.DashScopeApi;
 import com.alibaba.cloud.ai.dashscope.spec.DashScopeModel;
-import com.coolxer.controller.BaseController;
 import com.coolxer.commons.enums.MessageType;
+import com.coolxer.controller.BaseController;
 import com.coolxer.dao.mysql.entity.ChatSession;
 import com.coolxer.dao.mysql.entity.User;
 import com.coolxer.model.dih.ChatResponse;
@@ -17,6 +16,7 @@ import com.coolxer.service.dih.agent.InspectionAgent;
 import com.coolxer.utils.JacksonUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 import org.apache.commons.lang3.BooleanUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

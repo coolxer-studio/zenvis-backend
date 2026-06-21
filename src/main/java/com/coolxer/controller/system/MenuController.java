@@ -14,6 +14,7 @@ import com.coolxer.model.system.vo.MenuVo;
 import com.coolxer.service.system.MenuService;
 import com.coolxer.utils.CommonUtil;
 import io.swagger.annotations.Api;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
