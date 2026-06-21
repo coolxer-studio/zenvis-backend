@@ -1,5 +1,6 @@
 package com.coolxer.model.policy.dto;
 
+import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 /**
@@ -21,6 +22,7 @@ public class ConfigDto {
     /**
      * 文件名
      */
+    @NotBlank(message = "文件名不能为空")
     private String fileName;
 
     /**

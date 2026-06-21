@@ -2,6 +2,7 @@ package com.coolxer.model.system.dto;
 
 import com.coolxer.commons.enums.MenuLevel;
 import com.coolxer.commons.enums.MenuType;
+import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 import java.util.List;
@@ -20,6 +21,7 @@ public class MenuDto {
     /**
      * 菜单名
      */
+    @NotBlank(message = "菜单名称不能为空")
     private String name;
 
     /**

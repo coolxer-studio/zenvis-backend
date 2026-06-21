@@ -5,6 +5,7 @@ import com.coolxer.commons.enums.business.asset.AssetRuleAction;
 import com.coolxer.commons.enums.business.asset.AssetRuleStatus;
 import com.coolxer.configuration.JsonToStringDeserializer;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 /**
@@ -21,6 +22,7 @@ public class AssetRuleDto {
     /**
      * 规则名称
      */
+    @NotBlank(message = "规则名称不能为空")
     private String name;
 
     /**

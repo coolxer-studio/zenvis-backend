@@ -1,5 +1,6 @@
 package com.coolxer.model.system.dto;
 
+import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 /**
@@ -15,6 +16,7 @@ public class RoleDto {
     /**
      * 角色名称
      */
+    @NotBlank(message = "角色名称不能为空")
     private String name;
 
     /**

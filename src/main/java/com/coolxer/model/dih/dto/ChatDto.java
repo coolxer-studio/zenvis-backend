@@ -1,5 +1,6 @@
 package com.coolxer.model.dih.dto;
 
+import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 @Data
@@ -23,6 +24,7 @@ public class ChatDto {
     /**
      * 会话内容
      */
+    @NotBlank(message = "消息内容不能为空")
     private String message;
 
     /**

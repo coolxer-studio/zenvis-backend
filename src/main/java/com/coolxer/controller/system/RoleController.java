@@ -14,6 +14,7 @@ import com.coolxer.service.system.PermissionTreeService;
 import com.coolxer.service.system.RoleService;
 import com.coolxer.utils.CommonUtil;
 import io.swagger.annotations.ApiOperation;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -75,7 +76,7 @@ public class RoleController extends BaseController {
     }
 
     @PostMapping({"/{id}/update"})
-    public ResponseWrap<?> update(@PathVariable("id") Long id, @RequestBody RoleDto roleDto) {
+    public ResponseWrap<?> update(@PathVariable("id") Long id, @Valid @RequestBody RoleDto roleDto) {
         try {
             if (roleService.update(id, roleDto)) {
                 return ResponseWrap.success("修改成功");
@@ -87,7 +88,7 @@ public class RoleController extends BaseController {
     }
 
     @PostMapping({"/{ids}/bulk-update"})
-    public ResponseWrap<?> bulkUpdate(@PathVariable("ids") Long[] ids, @RequestBody RoleDto roleDto) {
+    public ResponseWrap<?> bulkUpdate(@PathVariable("ids") Long[] ids, @Valid @RequestBody RoleDto roleDto) {
         try {
             for (long id : ids) {
                 roleService.update(id, roleDto);

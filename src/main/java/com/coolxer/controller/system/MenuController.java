@@ -36,7 +36,7 @@ public class MenuController extends BaseController {
     private MenuService menuService;
 
     @PostMapping({"/add"})
-    public ResponseWrap<?> add(@RequestBody MenuDto menuDto) {
+    public ResponseWrap<?> add(@Valid @RequestBody MenuDto menuDto) {
 
         try {
             if (menuService.create(menuDto) != null) {
@@ -70,7 +70,7 @@ public class MenuController extends BaseController {
     }
 
     @PostMapping({"/{id}/update"})
-    public ResponseWrap<?> update(@PathVariable("id") Long id, @RequestBody MenuDto menuDto) {
+    public ResponseWrap<?> update(@PathVariable("id") Long id, @Valid @RequestBody MenuDto menuDto) {
         try {
             if (menuService.update(id, menuDto)) {
                 return ResponseWrap.success("修改成功");

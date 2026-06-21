@@ -14,6 +14,7 @@ import com.coolxer.model.system.vo.PluginVo;
 import com.coolxer.service.system.PluginService;
 import io.swagger.annotations.Api;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;

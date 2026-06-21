@@ -93,7 +93,7 @@ public class ConfigController {
      */
     @PostMapping(value = "/modify")
     @ApiOperation(value = "修改文件", notes = "修改文件")
-    public ResponseWrap<Void> modify(@PathVariable("type") String type, @RequestBody ConfigDto configDto) {
+    public ResponseWrap<Void> modify(@PathVariable("type") String type, @Valid @RequestBody ConfigDto configDto) {
         if (configService.fileExistsInConfigPath(type, configDto.getFileName())) {
             configService.modifyConfig(type, configDto);
             return ResponseWrap.success();

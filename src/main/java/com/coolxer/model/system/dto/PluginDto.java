@@ -1,5 +1,6 @@
 package com.coolxer.model.system.dto;
 
+import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 /**
@@ -16,6 +17,7 @@ public class PluginDto {
     /**
      * 插件名
      */
+    @NotBlank(message = "插件名称不能为空")
     private String name;
 
     /**
@@ -26,6 +28,7 @@ public class PluginDto {
     /**
      * 包名
      */
+    @NotBlank(message = "包名不能为空")
     private String packageName;
 
     /**

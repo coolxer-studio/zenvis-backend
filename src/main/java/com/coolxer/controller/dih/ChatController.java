@@ -67,7 +67,7 @@ public class ChatController extends BaseController {
     @Operation(summary = "DashScope Flux Chat")
     public Flux<String> chat(
             HttpServletResponse response,
-            @RequestBody ChatDto chatDto
+            @Valid @RequestBody ChatDto chatDto
     ) {
         // TODO 临时限制ask之外的不允许使用
         if (chatDto.getType() != null && chatDto.getType().startsWith("agent") && !"agent_inspect".equals(chatDto.getType())) {

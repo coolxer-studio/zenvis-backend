@@ -12,6 +12,7 @@ import com.coolxer.model.system.vo.UserVo;
 import com.coolxer.service.system.UserService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -29,7 +30,7 @@ public class UserController extends BaseController {
     private UserService userService;
 
     @PostMapping({"/add"})
-    public ResponseWrap<?> add(@RequestBody UserDto userDto) {
+    public ResponseWrap<?> add(@Valid @RequestBody UserDto userDto) {
 
         try {
             if (userService.create(userDto) != null) {
@@ -109,7 +110,7 @@ public class UserController extends BaseController {
      */
     @PostMapping(value = "/update-password")
     @ApiOperation(value = "修改用户密码", notes = "修改用户密码")
-    public ResponseWrap<Void> updatePassword(@RequestBody PasswordChangeDto passwordChangeDto) {
+    public ResponseWrap<Void> updatePassword(@Valid @RequestBody PasswordChangeDto passwordChangeDto) {
 
         User opt = getSessionUser();
         userService.checkPassword(passwordChangeDto, opt);

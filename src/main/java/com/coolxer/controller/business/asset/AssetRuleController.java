@@ -12,6 +12,7 @@ import com.coolxer.model.business.asset.vo.AssetRuleVo;
 import com.coolxer.service.business.asset.AssetRuleService;
 import com.coolxer.utils.CommonUtil;
 import io.swagger.annotations.Api;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -69,7 +70,7 @@ public class AssetRuleController extends BaseController {
     }
 
     @PostMapping({"/{id}/update"})
-    public ResponseWrap<?> update(@PathVariable("id") Long id, @RequestBody AssetRuleDto assetRuleDto) {
+    public ResponseWrap<?> update(@PathVariable("id") Long id, @Valid @RequestBody AssetRuleDto assetRuleDto) {
         try {
             if (assetRuleService.updateRule(id, assetRuleDto)) {
                 return ResponseWrap.success("修改成功");
