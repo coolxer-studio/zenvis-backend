@@ -110,5 +110,20 @@ public class ResponseWrap<T> {
         return responseWrap;
     }
 
+    /**
+     * 构建请求失败的响应对象。
+     *
+     * @param status HTTP状态码
+     * @param msg    错误信息
+     * @param <T>    数据类型
+     * @return 请求失败的响应对象
+     */
+    public static <T> @NotNull ResponseWrap<T> fail(int status, String msg) {
+        ResponseWrap<T> responseWrap = new ResponseWrap<>();
+        responseWrap.setStatus(status);
+        responseWrap.setMsg(msg);
+        return responseWrap;
+    }
+
 
 }

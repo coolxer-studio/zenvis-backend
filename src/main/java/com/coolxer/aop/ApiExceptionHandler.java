@@ -33,14 +33,20 @@ public class ApiExceptionHandler {
     /**
      * 统一异常处理
      *
+     * @param ex 异常
      * @return 结果
      */
     @ResponseBody
     @ExceptionHandler(Throwable.class)
-    @ResponseStatus(HttpStatus.BAD_REQUEST)
     public ResponseWrap<String> processMethod2(Throwable ex) {
         log.error("", ex);
-        return ResponseWrap.fail();
+        HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
+        if (ex instanceof ApiException apiException) {
+            status = HttpStatus.valueOf(apiException.getCode());
+        } else if (ex instanceof IllegalArgumentException || ex instanceof MissingServletRequestParameterException) {
+            status = HttpStatus.BAD_REQUEST;
+        }
+        return ResponseWrap.fail(status.value(), ex.getMessage());
     }
 
     /**
