@@ -159,6 +159,8 @@ services:
     environment:
       TZ: Asia/Shanghai
     restart: unless-stopped
+    networks:
+      - zenvis-network
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:11002/actuator/health" ]
       interval: 30s
