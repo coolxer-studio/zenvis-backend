@@ -6,7 +6,11 @@
 
 ---
 
-## 快速运行 ZenVis 服务
+## 项目简介
+
+ZenVis Backend 是基于 Spring Boot + MySQL 构建的ZenVis的后端项目，提供仪表盘、数据检索、策略管理、数据集成等核心接口功能模块。
+
+## 快速运行 ZenVis（含前后端） 服务
 
 ### 1. docker-compose 运行（推荐）
 
@@ -19,9 +23,12 @@ docker-compose up -d
 
 | 服务 | 地址 |
 | :--- | :--- |
-| WEB 服务 | `http://<ip>:11000` |
 | API接口 服务 | `http://<ip>:11001` |
-| Swagger 文档 | `http://<ip>:11001/swagger-ui/` |
+| Swagger 文档 | `http://<ip>:11001/swagger-ui/index.html` |
+
+> **注意**
+> 当前项目仅为后端服务，不包含前端界面。
+> 如需完整的前后端体验，请参考前端仓库：[zenvis-frontend](https://gitee.com/coolxer-studio/zenvis-frontend)
 
 ---
 
@@ -131,7 +138,7 @@ ZenVis = **配置化数据存储 + 可视化引擎 + 检索分析 + 插件扩展
 | 时序数据库 | ClickHouse | 22.3+ |
 | 缓存/向量存储 | Redis / Redis Stack | 7.0+ |
 | ORM | Spring Data JPA | - |
-| 文档 | SpringFox Swagger | 3.0.0 |
+| API 文档 | SpringDoc OpenAPI | 2.3.0 |
 | 构建工具 | Maven | 3.8+ |
 | 容器化 | Docker | - |
 
@@ -156,8 +163,13 @@ mvn clean compile
 # 运行项目（开发环境）
 mvn spring-boot:run -Dspring-boot.run.profiles=dev
 ```
+> **注意**
+> 当前项目仅为后端服务，不包含前端界面。
+> 前端运行参考前端仓库：[zenvis-frontend](https://gitee.com/coolxer-studio/zenvis-frontend)
 
-#### 打包构建
+### 4. 构建与部署
+
+######## 打包构建
 
 ```bash
 # 打包
@@ -334,10 +346,11 @@ zenvis-backend/
 ### 深度思考助手 (DIH)
 | 功能 | 控制器 | 说明 |
 | :--- | :--- | :--- |
-| AI 聊天 | `ChatController` | 智能聊天接口 |
+| AI 聊天 | `ChatController` | 智能聊天接口，支持自然语言查询 |
 | 聊天会话管理 | `ChatSessionController` | 会话生命周期管理 |
-| NL2SQL 查询 | `DihController` | 自然语言转 SQL |
+| NL2SQL 查询 | `DihController` | 自然语言转SQL查询 |
 | 向量存储查询 | `VectorStoreQueryController` | 向量检索接口 |
+| 智能巡检Agent | `InspectionAgent` | ReAct模式智能巡检Agent |
 
 ### 检索引擎
 | 功能 | 控制器 | 说明 |
