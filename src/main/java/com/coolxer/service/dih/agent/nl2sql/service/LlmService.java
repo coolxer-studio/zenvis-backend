@@ -1,0 +1,134 @@
+/*
+ * Copyright 2024-2025 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable applicable warranties or limitations
+ * under the License.
+ */
+package com.coolxer.service.dih.agent.nl2sql.service;
+
+import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatResponse;
+import reactor.core.publisher.Flux;
+
+/**
+ * LLM 服务封装类
+ */
+public class LlmService {
+
+	private static final ThreadLocal<String> CURRENT_MODEL = new ThreadLocal<>();
+
+	private final ChatClient chatClient;
+
+	public LlmService(ChatClient chatClient) {
+		this.chatClient = chatClient;
+	}
+
+	/**
+	 * 设置当前线程使用的模型，为 null 时清除
+	 */
+	public void setModel(String model) {
+		if (model != null) {
+			CURRENT_MODEL.set(model);
+		}
+		else {
+			CURRENT_MODEL.remove();
+		}
+	}
+
+	/**
+	 * 清除当前线程的模型设置
+	 */
+	public void clearModel() {
+		CURRENT_MODEL.remove();
+	}
+
+	/**
+	 * 获取当前线程的模型，为 null 时使用默认模型
+	 */
+	private String currentModel() {
+		return CURRENT_MODEL.get();
+	}
+
+	/**
+	 * 构建同步调用的运行时模型选项（禁用流式相关参数）
+	 */
+	private DashScopeChatOptions buildSyncModelOptions() {
+		String model = currentModel();
+		if (model == null) {
+			return null;
+		}
+		return DashScopeChatOptions.builder()
+				.withModel(model)
+				.withIncrementalOutput(false)
+				.build();
+	}
+
+	/**
+	 * 构建流式调用的运行时模型选项
+	 */
+	private DashScopeChatOptions buildStreamModelOptions() {
+		String model = currentModel();
+		if (model == null) {
+			return null;
+		}
+		return DashScopeChatOptions.builder()
+				.withModel(model)
+				.build();
+	}
+
+	/**
+	 * 同步调用 LLM
+	 */
+	public String call(String prompt) {
+		DashScopeChatOptions options = buildSyncModelOptions();
+		var spec = chatClient.prompt().user(prompt);
+		if (options != null) {
+			spec = spec.options(options);
+		}
+		return spec.call().content();
+	}
+
+	/**
+	 * 带系统提示的同步调用
+	 */
+	public String callWithSystemPrompt(String systemPrompt, String userPrompt) {
+		DashScopeChatOptions options = buildSyncModelOptions();
+		var spec = chatClient.prompt().system(systemPrompt).user(userPrompt);
+		if (options != null) {
+			spec = spec.options(options);
+		}
+		return spec.call().content();
+	}
+
+	/**
+	 * 流式调用 LLM
+	 */
+	public Flux<ChatResponse> streamCall(String prompt) {
+		DashScopeChatOptions options = buildStreamModelOptions();
+		var spec = chatClient.prompt().user(prompt);
+		if (options != null) {
+			spec = spec.options(options);
+		}
+		return spec.stream().chatResponse();
+	}
+
+	/**
+	 * 带系统提示的流式调用
+	 */
+	public Flux<ChatResponse> streamCallWithSystemPrompt(String systemPrompt, String userPrompt) {
+		DashScopeChatOptions options = buildStreamModelOptions();
+		var spec = chatClient.prompt().system(systemPrompt).user(userPrompt);
+		if (options != null) {
+			spec = spec.options(options);
+		}
+		return spec.stream().chatResponse();
+	}
+
+}

@@ -1,0 +1,3 @@
+# Ignore all files in this directory
+plugin-package_config/
+meta_config/com.coolxer.plugin.*.json
