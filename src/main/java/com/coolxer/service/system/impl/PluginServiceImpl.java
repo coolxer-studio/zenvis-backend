@@ -444,7 +444,12 @@ public class PluginServiceImpl implements PluginService {
             plugin.setStatus(PluginStatusType.INSTALLED);
             pluginRepository.save(plugin);
             writeLog(id, "7 文档加载到RAG......");
-            vectorStoreInitializerService.loadDocToRag(plugin.getPackageName().replaceAll("\\.", "_"), pluginPackTool.getDocPath());
+            try {
+                vectorStoreInitializerService.loadDocToRag(plugin.getPackageName().replaceAll("\\.", "_"), pluginPackTool.getDocPath());
+            } catch (Exception e) {
+                log.error("加载到RAG失败......", e);
+                writeLog(id, "加载到RAG失败......，跳过");
+            }
             writeLog(id, "完成......");
             return true;
         } catch (IOException e) {
