@@ -352,7 +352,12 @@ public class PluginServiceImpl implements PluginService {
                 WalkFileUtil.delete(pluginDir);
             }
             writeLog(id, "7 卸载RAG中的文档......");
-            vectorStoreInitializerService.unloadDocFromRag(plugin.getPackageName().replaceAll("\\.", "_"));
+            try {
+                vectorStoreInitializerService.unloadDocFromRag(plugin.getPackageName().replaceAll("\\.", "_"));
+            } catch (Exception e) {
+                log.error("卸载RAG中的文档失败......", e);
+                writeLog(id, "卸载RAG中的文档失败......，跳过");
+            }
             writeLog(id, "8 更新插件状态......");
             plugin.setStatus(PluginStatusType.UN_INSTALL);
             pluginRepository.save(plugin);
