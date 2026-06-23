@@ -61,11 +61,19 @@ public class InitComponent implements CommandLineRunner {
 
 
         dataInitiator.initData();
-        // mysql初始化，固定/init/mysql-init.sql
-        mysqlSchemeService.initScheme(customWebConfig.getSystemConfigPath() + "/init/mysql-init.sql");
-
-        // clickhouse初始化/init/clickhouse-init.sql
-        clickhouseSchemeService.initScheme(customWebConfig.getSystemConfigPath() + "/init/clickhouse-init.sql");
+        // mysql初始化，固定/init/mysql-init.sql，仅首次启动执行
+        Path mysqlInitFlag = Paths.get(customWebConfig.getSystemConfigPath(), "init", ".mysql-init.flag");
+        if (!Files.exists(mysqlInitFlag)) {
+            mysqlSchemeService.initScheme(customWebConfig.getSystemConfigPath() + "/init/mysql-init.sql");
+            Files.createFile(mysqlInitFlag);
+        }
+        // clickhouse初始化/init/clickhouse-init.sql，仅首次启动执行
+        Path clickhouseInitFlag = Paths.get(customWebConfig.getSystemConfigPath(), "init", ".clickhouse-init.flag");
+        if (!Files.exists(clickhouseInitFlag)) {
+            clickhouseSchemeService.initScheme(customWebConfig.getSystemConfigPath() + "/init/clickhouse-init.sql");
+            Files.createFile(clickhouseInitFlag);
+        }
+        
         // 初始化加载meta
         MetaData metaData = metaDataService.loadMetaData();
         // 初始化Clickhouse表
