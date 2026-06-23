@@ -11,15 +11,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.StringJoiner;
 
 /**
  * 系统数据初始化
@@ -40,23 +38,38 @@ public class ClickhouseSchemeServiceImpl implements ClickhouseSchemeService {
     @PersistenceContext(unitName = "clickhouse", type = PersistenceContextType.TRANSACTION)
     private EntityManager entityManager;
 
-    public void initScheme() {
-        Resource resource = resourceLoader.getResource("classpath:init/clickhouse-init.sql");
-        BufferedReader reader = null;
-        try {
-            reader = new BufferedReader(new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8));
-        } catch (IOException e) {
-            e.printStackTrace();
+    public void initScheme(String initSqlPath) {
+        File sqlFile = new File(initSqlPath);
+        // 校验文件是否存在且为普通文件
+        if (!sqlFile.exists() || !sqlFile.isFile()) {
+            log.warn("SQL初始化文件不存在，路径: {}", initSqlPath);
         }
-        // 使用流处理来读取sql文件并同时去除空行和SQL注释
-        String sqlScript = reader.lines()
-                .map(this::removeComments)
-                .filter(line -> !line.trim().isEmpty())
-                .reduce((line1, line2) -> line1 + "\n" + line2)
-                .orElse("");
-        // 执行sql脚本
+        // try-with-resources 自动关闭所有流，彻底避免句柄泄漏
+        String sqlScript;
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(new FileInputStream(sqlFile), StandardCharsets.UTF_8)
+        )) {
+            // 使用StringJoiner替代reduce字符串拼接，减少GC开销
+            StringJoiner joiner = new StringJoiner("\n");
+            reader.lines()
+                    .map(this::removeComments)
+                    .map(String::trim)
+                    .filter(line -> !line.isEmpty())
+                    .forEach(joiner::add);
+            sqlScript = joiner.toString();
+        } catch (IOException e) {
+            log.error("读取SQL初始化文件失败，路径: {}", initSqlPath, e);
+            throw new RuntimeException("读取SQL脚本文件IO异常", e);
+        }
+
+        // 空脚本防护
+        if (sqlScript.isBlank()) {
+            log.warn("SQL初始化文件内容为空，无需执行");
+            return;
+        }
+        // 执行SQL脚本
         executeSql(sqlScript);
-        log.info("clickhouse scheme init successfully.");
+        log.info("ClickHouse 表结构初始化成功，脚本路径: {}", initSqlPath);
     }
 
     public void loadSchemeFromMetaData(MetaData metaData) {
