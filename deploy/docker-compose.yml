@@ -1,22 +1,36 @@
-version: '3.8'
-
 services:
   redis-service:
-    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/redis:6.2.6
+    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/redis:7-${ARCH}
     container_name: redis-signal
     environment:
       TZ: Asia/Shanghai
     ports:
-      - 6379:6379
+      - "6379:6379"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./config/redis/redis.conf:/usr/local/redis/redis.conf
       - ./data/redis/data:/data
     command:
       redis-server /usr/local/redis/redis.conf
-    restart: always
+    restart: unless-stopped
     networks:
       - zenvis-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+    labels:
+      - "app=redis"
+      - "version=7-${ARCH}"
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 30s
@@ -25,21 +39,37 @@ services:
       start_period: 10s
 
   redis-stack-service:
-    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/redis-stack-server:7.2.0-v18
+    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/redis-stack-server:7.2.0-v18-${ARCH}
     container_name: redis-stack-signal
     environment:
       TZ: Asia/Shanghai
     ports:
-      - 16379:6379
+      - "16379:6379"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./config/redis-stack/redis-stack.conf:/etc/redis-stack.conf
       - ./data/redis-stack/data:/data
     command:
       redis-server /etc/redis-stack.conf
-    restart: always
+    restart: unless-stopped
     networks:
       - zenvis-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+    labels:
+      - "app=redis-stack"
+      - "version=7.2.0-v18-${ARCH}"
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 30s
@@ -48,21 +78,37 @@ services:
       start_period: 10s
 
   mysql-service:
-    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/mysql:8.0.20
+    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/mysql:8.4-${ARCH}
     container_name: mysql8
     environment:
       TZ: Asia/Shanghai
       MYSQL_ROOT_PASSWORD: uEPYrBanWaRJhCKHy3FP
     ports:
-      - 3306:3306
+      - "3306:3306"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./data/mysql/data:/var/lib/mysql:rw
       - ./config/mysql/my.cnf:/etc/mysql/conf.d/my.cnf
       - ./config/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
-    restart: always
+    restart: unless-stopped
     networks:
       - zenvis-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "5"
+    labels:
+      - "app=mysql"
+      - "version=8.4-${ARCH}"
     healthcheck:
       test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-puEPYrBanWaRJhCKHy3FP" ]
       interval: 30s
@@ -71,18 +117,21 @@ services:
       start_period: 30s
 
   clickhouse-service:
-    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/clickhouse:22.8.16
+    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/clickhouse-server:25.9-${ARCH}
     container_name: clickhouse-service
+    hostname: clickhouse-service
     environment:
       TZ: Asia/Shanghai
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: SFGEfSVVMcUHCBCjKmzJ
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     ports:
       - "8123:8123"
       - "9000:9000"
       - "9009:9009"
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - ./config/clickhouse/config.xml:/etc/clickhouse-server/config.d/config.xml
-      - ./config/clickhouse/users.xml:/etc/clickhouse-server/users.xml
       - ./data/clickhouse/logs:/var/log/clickhouse-server
       - ./data/clickhouse/data:/var/lib/clickhouse
     restart: unless-stopped
@@ -94,9 +143,25 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "5"
+    labels:
+      - "app=clickhouse"
+      - "version=25.9-${ARCH}"
 
   zenvis-frontend:
-    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/zenvis-frontend:latest
+    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/zenvis-frontend:latest-${ARCH}
     container_name: zenvis-frontend
     environment:
       TZ: Asia/Shanghai
@@ -105,11 +170,27 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./config/zenvis-frontend/conf.d:/etc/nginx/conf.d
-    restart: always
+    restart: unless-stopped
     depends_on:
       - zenvis-backend
     networks:
       - zenvis-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+    labels:
+      - "app=zenvis-frontend"
+      - "version=latest-${ARCH}"
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:11000" ]
       interval: 30s
@@ -118,7 +199,7 @@ services:
       start_period: 30s
 
   zenvis-backend:
-    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/zenvis-backend:latest
+    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/zenvis-backend:latest-${ARCH}
     container_name: zenvis-backend
     environment:
       TZ: Asia/Shanghai
@@ -128,7 +209,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ./config/zenvis-backend/config/application.properties:/app/application.properties
       - ./open_config:/config/open_config
-    restart: always
+    restart: unless-stopped
     depends_on:
       redis-service:
         condition: service_healthy
@@ -140,6 +221,22 @@ services:
         condition: service_healthy
     networks:
       - zenvis-network
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "5"
+    labels:
+      - "app=zenvis-backend"
+      - "version=latest-${ARCH}"
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:11001/api/v1/system/about/info" ]
       interval: 30s
@@ -148,7 +245,7 @@ services:
       start_period: 60s
 
   vectum-service:
-    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/vectum:latest
+    image: crpi-4pdi7kz96g4v0tg3.cn-beijing.personal.cr.aliyuncs.com/coolxer-studio/vectum:latest-${ARCH}
     container_name: vectum-service
     ports:
       - "11002:11002"
@@ -161,6 +258,22 @@ services:
     restart: unless-stopped
     networks:
       - zenvis-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "5"
+    labels:
+      - "app=vectum"
+      - "version=latest-${ARCH}"
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:11002/actuator/health" ]
       interval: 30s
