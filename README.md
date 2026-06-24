@@ -199,7 +199,12 @@ docker run -d -p 11001:11001 zenvis-backend:latest
 #### 使用构建脚本
 
 ```bash
-bash build.sh
+# 使用构建脚本构建（默认不推送镜像）
+./build.sh
+
+# 构建并推送镜像到 Docker Registry
+PUSH_IMAGE=true ./build.sh
+
 ```
 
 该脚本会自动执行：
