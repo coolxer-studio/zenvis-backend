@@ -22,6 +22,8 @@ public interface QueryEngine {
 
     public BigDecimal count(String tableName, Map<String, Object> searchMap);
 
+    public BigDecimal countToday(String tableName, Map<String, Object> searchMap);
+
     Map<String, Object> countByDateOfWeek(String tableName, String timeField);
 
     Map<String, Object> countByField(String tableName, String field);

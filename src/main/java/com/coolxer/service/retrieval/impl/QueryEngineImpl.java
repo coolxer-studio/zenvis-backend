@@ -106,6 +106,19 @@ public class QueryEngineImpl implements QueryEngine {
         return queryCount(tableName, whereClause);
     }
 
+    @Transactional
+    public BigDecimal countToday(String tableName, Map<String, Object> searchMap) {
+        String whereClause = " where 1=1";
+        if (MapUtils.isNotEmpty(searchMap)) {
+            whereClause = " where " + searchMap.entrySet().stream()
+                    .map(entry -> entry.getKey() + " = " + entry.getValue())
+                    .collect(Collectors.joining(" and "));
+        }
+        // 补充时间条件
+        whereClause += " and insert_time >= toStartOfDay(now())";
+        return queryCount(tableName, whereClause);
+    }
+
     @Override
     @Transactional
     public Map<String, Object> countByDateOfWeek(String tableName, String timeField) {

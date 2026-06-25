@@ -106,6 +106,8 @@ public interface EntityCoreService {
 
     Map<String, Object> count(List<String> entities);
 
+    Map<String, Object> countToady(List<String> entities);
+
     Map<String, Object> trend(List<String> entities);
 
     Map<String, Object> statistics(List<String> entities, String field);
