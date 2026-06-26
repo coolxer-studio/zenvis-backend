@@ -17,7 +17,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
- * 看板管理
+ * 看板管理（临时代码，将来要放到服务中专门提供接口）（当前的接口作为数据展示应该放到通用接口中）
  */
 @Tag(name = "看板管理")
 @Slf4j

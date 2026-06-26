@@ -38,7 +38,16 @@ public class EntityCountController extends BaseController {
         } catch (Exception e) {
             return ResponseWrap.fail(e);
         }
+    }
 
+    @GetMapping({"/count_today"})
+    public ResponseWrap<?> countToday(@RequestParam(value = "entities") List<String> entities) {
+        try {
+            Map<String, Object> entitiesCount = entityCoreService.countToady(entities);
+            return ResponseWrap.success(entitiesCount);
+        } catch (Exception e) {
+            return ResponseWrap.fail(e);
+        }
     }
 
     @GetMapping({"/trend"})

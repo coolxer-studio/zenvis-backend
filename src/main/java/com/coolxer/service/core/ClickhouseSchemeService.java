@@ -7,9 +7,9 @@ import com.coolxer.model.retrieval.meta.MetaData;
  */
 public interface ClickhouseSchemeService {
     /**
-     * 通过init目录，初始化scheme
+     * 初始化scheme
      */
-    public void initScheme();
+    public void initScheme(String initSqlPath);
 
     /**
      * 通过MetaData数据初始化

@@ -174,6 +174,18 @@ public class EntityCoreServiceImpl implements EntityCoreService {
     }
 
     @Override
+    public Map<String, Object> countToady(List<String> entities) {
+        Map<String, Object> countData = new HashMap<>();
+        for (String entityName : entities) {
+            DataEntity dataEntity = metaDataService.getDataEntityByName(entityName);
+            if (dataEntity != null) {
+                countData.put(entityName, queryEngine.count(dataEntity.getTableName(), null).longValue());
+            }
+        }
+        return countData;
+    }
+
+    @Override
     public Map<String, Object> trend(List<String> entities) {
         List<String> assetNames = new ArrayList<>();
         List<String> assetLabels = new ArrayList<>();

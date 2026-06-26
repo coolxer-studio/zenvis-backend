@@ -129,6 +129,24 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+<!-- Spring AI MCP Server WebMVC -->
+		<dependency>
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
+			<version>${spring-ai.version}</version>
+			<exclusions>
+				<!-- 排除 Jackson 3.x 依赖,避免与 Spring Boot 3.2.0 的 Jackson 2.x 冲突 -->
+				<exclusion>
+					<groupId>tools.jackson.core</groupId>
+					<artifactId>jackson-databind</artifactId>
+				</exclusion>
+				<exclusion>
+					<groupId>tools.jackson.core</groupId>
+					<artifactId>jackson-core</artifactId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>

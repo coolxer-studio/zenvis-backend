@@ -6,6 +6,7 @@ import com.coolxer.configuration.CustomWebConfig;
 import com.coolxer.configuration.extend.ExtendJarManager;
 import com.coolxer.model.retrieval.meta.MetaData;
 import com.coolxer.service.core.ClickhouseSchemeService;
+import com.coolxer.service.core.MysqlSchemeService;
 import com.coolxer.service.retrieval.MetaDataService;
 import com.coolxer.service.system.PluginService;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +33,9 @@ public class InitComponent implements CommandLineRunner {
 
     @Autowired
     private ClickhouseSchemeService clickhouseSchemeService;
+
+    @Autowired
+    private MysqlSchemeService mysqlSchemeService;
     @Autowired
     private DataInitiator dataInitiator;
 
@@ -55,10 +59,21 @@ public class InitComponent implements CommandLineRunner {
         log.info("userDir is {}", System.getProperty("user.dir"));
         log.info("config:{}", customWebConfig.toString());
 
-        clickhouseSchemeService.initScheme();
 
         dataInitiator.initData();
-
+        // mysql初始化，固定/init/mysql-init.sql，仅首次启动执行
+        Path mysqlInitFlag = Paths.get(customWebConfig.getSystemConfigPath(), "init", ".mysql-init.flag");
+        if (!Files.exists(mysqlInitFlag)) {
+            mysqlSchemeService.initScheme(customWebConfig.getSystemConfigPath() + "/init/mysql-init.sql");
+            Files.createFile(mysqlInitFlag);
+        }
+        // clickhouse初始化/init/clickhouse-init.sql，仅首次启动执行
+        Path clickhouseInitFlag = Paths.get(customWebConfig.getSystemConfigPath(), "init", ".clickhouse-init.flag");
+        if (!Files.exists(clickhouseInitFlag)) {
+            clickhouseSchemeService.initScheme(customWebConfig.getSystemConfigPath() + "/init/clickhouse-init.sql");
+            Files.createFile(clickhouseInitFlag);
+        }
+        
         // 初始化加载meta
         MetaData metaData = metaDataService.loadMetaData();
         // 初始化Clickhouse表
