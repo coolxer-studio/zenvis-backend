@@ -101,6 +101,7 @@ SQL安全校验
 位置：`com.coolxer.service.dih.agent.nl2sql.service.RedisNl2sqlService`
 
 功能：
+
 - 问题重写和关键词提取
 - Schema 召回和 SQL 生成
 - SQL 执行和结果处理
@@ -111,9 +112,9 @@ SQL安全校验
 
 ```java
 // Schema 向量类型
-- table: 表结构向量
-- column: 字段信息向量
-- schema: 完整Schema向量
+-table:表结构向量
+        -column:字段信息向量
+        -schema:完整Schema向量
 ```
 
 ## ReAct Agent
@@ -254,11 +255,11 @@ spring.ai.dashscope.api-key=${DASHSCOPE_API_KEY}
 
 ## NL2SQL 原理
 
-详见 [DIH/InspectionAgent-Analysis-and-Roadmap.md](DIH/InspectionAgent-Analysis-and-Roadmap.md)
+详见 [DIH/InspectionAgent-Analysis-and-Roadmap.md](../DIH/InspectionAgent-Analysis-and-Roadmap.md)
 
 ## Redis 向量命令
 
-详见 [DIH/redis-search-commands-guide.md](DIH/redis-search-commands-guide.md)
+详见 [DIH/redis-search-commands-guide.md](../DIH/redis-search-commands-guide.md)
 
 ## 下一步
 
