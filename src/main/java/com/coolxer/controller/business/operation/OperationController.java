@@ -14,7 +14,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 看板管理
+ * 看板管理（临时代码，将来要放到服务中专门提供接口）
  */
 @Tag(name = "看板管理")
 @Slf4j
