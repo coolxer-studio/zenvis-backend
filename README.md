@@ -19,13 +19,17 @@ cd zenvis-backend/deploy
 docker-compose up -d
 ```
 
+> 用户名: admin@admin.com  
+> 密码: admin@!QAZ2wsx
+
 ### 2. 服务访问
 
-| 服务         | 地址                                        |
-| :--------- | :---------------------------------------- |
-| web前端服务    | `http://<ip>:11000`                       |
-| API接口 服务   | `http://<ip>:11001`                       |
-| Swagger 文档 | `http://<ip>:11001/swagger-ui/index.html` |
+| 服务          | 地址                                          |
+|:------------|:--------------------------------------------|
+| web前端服务     | `http://<ip>:11000`                         |
+| API 接口 服务   | `http://<ip>:11001`                         |
+| MCP 接口 服务   | `http://<ip>:11002/sse`                     |
+| Swagger 文档  | `http://<ip>:11001/swagger-ui/index.html`   |
 
 ***
 
