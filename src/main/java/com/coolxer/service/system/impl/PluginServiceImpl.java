@@ -20,7 +20,6 @@ import com.coolxer.model.system.vo.MenuVo;
 import com.coolxer.model.system.vo.PluginVo;
 import com.coolxer.model.system.vo.PushTaskVo;
 import com.coolxer.service.core.ClickhouseSchemeService;
-import com.coolxer.service.dih.rag.VectorStoreInitializerService;
 import com.coolxer.service.retrieval.MetaDataService;
 import com.coolxer.service.system.MenuService;
 import com.coolxer.service.system.PluginService;
@@ -76,9 +75,6 @@ public class PluginServiceImpl implements PluginService {
 
     @Autowired
     private ExtendJarManager extendJarManager;
-
-    @Autowired
-    private VectorStoreInitializerService vectorStoreInitializerService;
 
     private static ConcurrentSkipListMap<Long, String> LOG_CACHE = new ConcurrentSkipListMap<>();
 
@@ -351,14 +347,7 @@ public class PluginServiceImpl implements PluginService {
             if (Files.exists(pluginDir)) {
                 WalkFileUtil.delete(pluginDir);
             }
-            writeLog(id, "7 卸载RAG中的文档......");
-            try {
-                vectorStoreInitializerService.unloadDocFromRag(plugin.getPackageName().replaceAll("\\.", "_"));
-            } catch (Exception e) {
-                log.error("卸载RAG中的文档失败......", e);
-                writeLog(id, "卸载RAG中的文档失败......，跳过");
-            }
-            writeLog(id, "8 更新插件状态......");
+            writeLog(id, "7 更新插件状态......");
             plugin.setStatus(PluginStatusType.UN_INSTALL);
             pluginRepository.save(plugin);
             writeLog(id, "完成......");
@@ -448,13 +437,6 @@ public class PluginServiceImpl implements PluginService {
             writeLog(id, "6 更新插件状态为已安装......");
             plugin.setStatus(PluginStatusType.INSTALLED);
             pluginRepository.save(plugin);
-            writeLog(id, "7 文档加载到RAG......");
-            try {
-                vectorStoreInitializerService.loadDocToRag(plugin.getPackageName().replaceAll("\\.", "_"), pluginPackTool.getDocPath());
-            } catch (Exception e) {
-                log.error("加载到RAG失败......", e);
-                writeLog(id, "加载到RAG失败......，跳过");
-            }
             writeLog(id, "完成......");
             return true;
         } catch (IOException e) {
