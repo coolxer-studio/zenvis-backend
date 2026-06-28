@@ -1,6 +1,5 @@
 package com.coolxer.controller.dih;
 
-import com.alibaba.cloud.ai.dashscope.spec.DashScopeModel;
 import com.coolxer.commons.enums.MessageType;
 import com.coolxer.controller.BaseController;
 import com.coolxer.dao.mysql.entity.ChatSession;
@@ -12,6 +11,7 @@ import com.coolxer.model.dih.dto.ChatSessionDto;
 import com.coolxer.service.dih.AIBaseService;
 import com.coolxer.service.dih.AIChatService;
 import com.coolxer.service.dih.ChatSessionService;
+import com.coolxer.service.dih.FixedPromptResponseService;
 import com.coolxer.service.dih.agent.InspectionAgent;
 import com.coolxer.utils.JacksonUtil;
 import io.swagger.v3.oas.annotations.Operation;
@@ -31,6 +31,7 @@ import reactor.core.publisher.Flux;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -52,6 +53,8 @@ public class ChatController extends BaseController {
     @Autowired
     private ChatSessionService chatSessionService;
     @Autowired
+    private FixedPromptResponseService fixedPromptResponseService;
+    @Autowired
     private InspectionAgent inspectionAgent;
 
 
@@ -60,11 +63,11 @@ public class ChatController extends BaseController {
      * 1. When the send prompt is empty, an error message is returned.
      * 2. When sending a model, it is allowed to be empty, and when the parameter has a value and
      * is in the model configuration list, the corresponding model is called. If there is no return error.
-     * If the model parameter is empty, set the default model. qwen-plus
+     * If the model parameter is empty, use the model configured by Spring AI OpenAI.
      * 3. The chatId chat memory, passed by the front-end, is of type Object and cannot be repeated
      */
     @PostMapping("/chat")
-    @Operation(summary = "DashScope Flux Chat")
+    @Operation(summary = "AI Flux Chat")
     public Flux<String> chat(
             HttpServletResponse response,
             @Valid @RequestBody ChatDto chatDto
@@ -75,9 +78,10 @@ public class ChatController extends BaseController {
         }
 
 
-        List<Map<String, String>> dashScope = baseService.getDashScope();
-        List<String> modelName = dashScope.stream()
-                .flatMap(map -> map.keySet().stream().map(map::get))
+        List<Map<String, String>> models = baseService.getModels();
+        List<String> modelName = models.stream()
+                .map(map -> map.get("model"))
+                .filter(StringUtils::hasText)
                 .distinct()
                 .toList();
 
@@ -87,15 +91,15 @@ public class ChatController extends BaseController {
         if (StringUtils.hasText(model)) {
             if (!modelName.contains(model)) {
                 return Flux.just("Input model not support.");
-            } else if ("auto".endsWith(model)) {
-                // 当前自动选择模型固定为qwen-plus
-                model = DashScopeModel.ChatModel.QWEN_PLUS.getValue();
-            } else if ("x-sage-v1".endsWith(model)) {
+            } else if ("auto".equals(model)) {
+                // 使用配置中的默认模型
+                model = null;
+            } else if ("x-sage-v1".equals(model)) {
                 // TODO 以后再添加自己的模型
-                model = DashScopeModel.ChatModel.QWEN_PLUS.getValue();
+                model = null;
             }
         } else {
-            model = DashScopeModel.ChatModel.QWEN_PLUS.getValue();
+            model = null;
         }
 
         // 检查chatId，如果不是已有会话，创建新的会话记录
@@ -135,7 +139,12 @@ public class ChatController extends BaseController {
         AtomicReference<MessageType> messageType = new AtomicReference<>(MessageType.TEXT);
 
         Flux<String> fluxResponse;
-        if ("agent_inspect".equals(chatDto.getType())) {
+        Optional<String> fixedResponse = fixedPromptResponseService.findResponse(prompt);
+        if (fixedResponse.isPresent()) {
+            log.info("固定提示词命中，直接返回测试文件中的预期回答。chatId={}", chatId);
+            messageType.set(MessageType.TEXT);
+            fluxResponse = Flux.just(fixedResponse.get());
+        } else if ("agent_inspect".equals(chatDto.getType())) {
             ChatResponse chatResponse = inspectionAgent.chat(chatDto.getMessage(), model, chatId);
             messageType.set(chatResponse.getType());
             fluxResponse = Flux.just(chatResponse.getContent());

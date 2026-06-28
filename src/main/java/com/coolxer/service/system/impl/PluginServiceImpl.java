@@ -20,6 +20,8 @@ import com.coolxer.model.system.vo.MenuVo;
 import com.coolxer.model.system.vo.PluginVo;
 import com.coolxer.model.system.vo.PushTaskVo;
 import com.coolxer.service.core.ClickhouseSchemeService;
+import com.coolxer.service.dih.agent.skill.SkillService;
+import com.coolxer.service.dih.rag.VectorStoreInitializerService;
 import com.coolxer.service.retrieval.MetaDataService;
 import com.coolxer.service.system.MenuService;
 import com.coolxer.service.system.PluginService;
@@ -55,6 +57,9 @@ import java.util.stream.Stream;
 @Service
 public class PluginServiceImpl implements PluginService {
 
+    private static final String PLUGIN_SKILL_DIR_NAME = "06_skill";
+    private static final String LEGACY_PLUGIN_SKILL_DIR_NAME = "skill";
+
     @Autowired
     private PluginRepository pluginRepository;
 
@@ -76,6 +81,15 @@ public class PluginServiceImpl implements PluginService {
     @Autowired
     private ExtendJarManager extendJarManager;
 
+<<<<<<< HEAD
+    @Autowired
+    private VectorStoreInitializerService vectorStoreInitializerService;
+
+    @Autowired
+    private SkillService skillService;
+
+=======
+>>>>>>> upstream/main
     private static ConcurrentSkipListMap<Long, String> LOG_CACHE = new ConcurrentSkipListMap<>();
 
     @Override
@@ -249,6 +263,12 @@ public class PluginServiceImpl implements PluginService {
                 // 拷贝 DOC 文档
                 Path docPath = Paths.get(customWebConfig.getPluginPath(), plugin.getPackageName(), "00_doc");
                 pluginPackTool.copyDoc(docPath);
+                // 拷贝 Skill 配置
+                Path installedSkillPath = skillService.getInstalledPluginSkillPath(plugin.getPackageName());
+                Path currentSkillPath = hasDirectoryContent(installedSkillPath)
+                        ? installedSkillPath
+                        : resolvePluginSkillPath(Paths.get(customWebConfig.getPluginPath(), plugin.getPackageName()));
+                pluginPackTool.copySkill(currentSkillPath);
                 // 2-2 构建meta文件
                 try (Stream<Path> paths = Files.walk(Paths.get(customWebConfig.getRetrievalMetaFilePath()))) {
                     paths.filter(Files::isRegularFile) // 过滤出文件
@@ -347,7 +367,21 @@ public class PluginServiceImpl implements PluginService {
             if (Files.exists(pluginDir)) {
                 WalkFileUtil.delete(pluginDir);
             }
-            writeLog(id, "7 更新插件状态......");
+            writeLog(id, "7 卸载RAG中的文档......");
+            try {
+                vectorStoreInitializerService.unloadDocFromRag(plugin.getPackageName().replaceAll("\\.", "_"));
+            } catch (Exception e) {
+                log.error("卸载RAG中的文档失败......", e);
+                writeLog(id, "卸载RAG中的文档失败......，跳过");
+            }
+            writeLog(id, "8 卸载插件Skill......");
+            try {
+                skillService.uninstallPluginSkills(plugin.getPackageName());
+            } catch (Exception e) {
+                log.error("卸载插件Skill失败......", e);
+                writeLog(id, "卸载插件Skill失败......，跳过");
+            }
+            writeLog(id, "9 更新插件状态......");
             plugin.setStatus(PluginStatusType.UN_INSTALL);
             pluginRepository.save(plugin);
             writeLog(id, "完成......");
@@ -437,6 +471,20 @@ public class PluginServiceImpl implements PluginService {
             writeLog(id, "6 更新插件状态为已安装......");
             plugin.setStatus(PluginStatusType.INSTALLED);
             pluginRepository.save(plugin);
+            writeLog(id, "7 文档加载到RAG......");
+            try {
+                vectorStoreInitializerService.loadDocToRag(plugin.getPackageName().replaceAll("\\.", "_"), pluginPackTool.getDocPath());
+            } catch (Exception e) {
+                log.error("加载到RAG失败......", e);
+                writeLog(id, "加载到RAG失败......，跳过");
+            }
+            writeLog(id, "8 加载插件Skill......");
+            try {
+                skillService.installPluginSkills(plugin.getPackageName(), pluginPackTool.getSkillPath());
+            } catch (Exception e) {
+                log.error("加载插件Skill失败......", e);
+                writeLog(id, "加载插件Skill失败......，跳过");
+            }
             writeLog(id, "完成......");
             return true;
         } catch (IOException e) {
@@ -556,6 +604,26 @@ public class PluginServiceImpl implements PluginService {
         }
     }
 
+    private static Path resolvePluginSkillPath(Path pluginDir) {
+        Path skillPath = pluginDir.resolve(PLUGIN_SKILL_DIR_NAME);
+        Path legacySkillPath = pluginDir.resolve(LEGACY_PLUGIN_SKILL_DIR_NAME);
+        if (hasDirectoryContent(skillPath) || !hasDirectoryContent(legacySkillPath)) {
+            return skillPath;
+        }
+        return legacySkillPath;
+    }
+
+    private static boolean hasDirectoryContent(Path path) {
+        if (!Files.exists(path) || !Files.isDirectory(path)) {
+            return false;
+        }
+        try (Stream<Path> paths = Files.list(path)) {
+            return paths.findAny().isPresent();
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
     private static void responseDownload(HttpServletResponse response, Path inputFilePath) {
         InputStream inputStream = null;// 文件的存放路径
         try {
@@ -610,6 +678,8 @@ public class PluginServiceImpl implements PluginService {
         private Path apiPath;
         private Path uiPath;
         private Path menuPath;
+        private Path skillPath;
+        private Path legacySkillPath;
 
         public PluginPackTool buildPacker(String workspaceDir, String packageName) {
             this.pluginFilePath = Paths.get(workspaceDir).resolve("temp/" + DateUtil.getCurrentDateTime().replace(" ", "/") + "/" + packageName);
@@ -632,6 +702,8 @@ public class PluginServiceImpl implements PluginService {
             this.apiPath = pluginFilePath.resolve("03_api");
             this.uiPath = pluginFilePath.resolve("04_ui");
             this.menuPath = pluginFilePath.resolve("05_menu");
+            this.skillPath = pluginFilePath.resolve(PLUGIN_SKILL_DIR_NAME);
+            this.legacySkillPath = pluginFilePath.resolve(LEGACY_PLUGIN_SKILL_DIR_NAME);
             return this;
         }
 
@@ -645,6 +717,7 @@ public class PluginServiceImpl implements PluginService {
                 WalkFileUtil.mkdir(apiPath);
                 WalkFileUtil.mkdir(uiPath);
                 WalkFileUtil.mkdir(menuPath);
+                WalkFileUtil.mkdir(skillPath);
             } catch (IOException e) {
                 e.printStackTrace();
             }
@@ -713,6 +786,16 @@ public class PluginServiceImpl implements PluginService {
         public void copyUI(Path currentUIPath) {
             try {
                 WalkFileUtil.copy(currentUIPath, uiPath);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        public void copySkill(Path currentSkillPath) {
+            try {
+                if (currentSkillPath != null && Files.exists(currentSkillPath)) {
+                    WalkFileUtil.copy(currentSkillPath, skillPath);
+                }
             } catch (IOException e) {
                 e.printStackTrace();
             }
@@ -804,6 +887,13 @@ public class PluginServiceImpl implements PluginService {
                 e.printStackTrace();
             }
             return null;
+        }
+
+        public Path getSkillPath() {
+            if (hasDirectoryContent(skillPath) || !hasDirectoryContent(legacySkillPath)) {
+                return skillPath;
+            }
+            return legacySkillPath;
         }
     }
 
