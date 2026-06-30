@@ -1,7 +1,12 @@
 package com.coolxer.service.dih;
 
+import com.coolxer.configuration.JacksonConfig;
 import com.coolxer.configuration.ai.AiEmbeddingProperties;
+import com.coolxer.dao.mysql.entity.User;
+import com.coolxer.model.dih.ChatAttachment;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.coolxer.service.dih.advisor.ReasoningContentAdvisor;
+import com.coolxer.service.dih.logging.LlmLogHelper;
 import com.coolxer.service.dih.rag.VectorStoreDelegate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,16 +17,36 @@ import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvi
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 
-import java.util.Objects;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * 聊天服务
@@ -32,7 +57,18 @@ public class AIChatService {
 
     private static final Logger log = LoggerFactory.getLogger(AIChatService.class);
 
+    private static final String QWEN_NATIVE_DEEP_THINK_SYSTEM_PROMPT = """
+            You are a thoughtful AI assistant. Use the enabled reasoning mode to think before answering.
+            Do not include <think> tags or reasoning text in the final answer, because the platform displays
+            reasoning_content separately. Answer the user's question directly after reasoning, in the same
+            language as the user when possible.
+            """;
+
     private final ChatClient chatClient;
+
+    private final ChatClient systemPromptChatClient;
+
+    private final ChatMemory chatMemory;
 
     private final PromptTemplate deepThinkPromptTemplate;
 
@@ -42,17 +78,32 @@ public class AIChatService {
 
     private final AiEmbeddingProperties embeddingProperties;
 
+    private final ChatAttachmentService chatAttachmentService;
+
+    private final HttpClient openAiHttpClient;
+
+    private final String openAiBaseUrl;
+
+    private final String openAiApiKey;
+
+    private final String defaultChatModel;
+
     public AIChatService(
             @Qualifier("springAiChatMemoryRepository") ChatMemoryRepository chatMemoryRepository,
             ChatModel chatModel,
             @Qualifier("askSystemPromptTemplate") PromptTemplate systemPromptTemplate,
             @Qualifier("deepThinkPromptTemplate") PromptTemplate deepThinkPromptTemplate,
             VectorStoreDelegate vectorStoreDelegate,
-            AiEmbeddingProperties embeddingProperties
+            AiEmbeddingProperties embeddingProperties,
+            ChatAttachmentService chatAttachmentService,
+            @Value("${spring.ai.openai.base-url:}") String openAiBaseUrl,
+            @Value("${spring.ai.openai.api-key:}") String openAiApiKey,
+            @Value("${spring.ai.openai.chat.options.model:}") String defaultChatModel
     ) {
         ChatMemory chatMemory = MessageWindowChatMemory.builder()
                 .chatMemoryRepository(chatMemoryRepository)
                 .build();
+        this.chatMemory = chatMemory;
 
         this.chatClient = ChatClient.builder(chatModel)
                 .defaultSystem(
@@ -60,22 +111,43 @@ public class AIChatService {
                 ).defaultAdvisors(new SimpleLoggerAdvisor())
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .build();
+        this.systemPromptChatClient = ChatClient.builder(chatModel)
+                .defaultAdvisors(new SimpleLoggerAdvisor())
+                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
+                .build();
 
         this.deepThinkPromptTemplate = deepThinkPromptTemplate;
         this.reasoningContentAdvisor = new ReasoningContentAdvisor(1);
         this.vectorStoreDelegate = vectorStoreDelegate;
         this.embeddingProperties = embeddingProperties;
+        this.chatAttachmentService = chatAttachmentService;
+        this.openAiHttpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(15))
+                .build();
+        this.openAiBaseUrl = openAiBaseUrl;
+        this.openAiApiKey = openAiApiKey;
+        this.defaultChatModel = defaultChatModel;
     }
 
     public Flux<String> chat(String chatId, String model, String prompt) {
+        return chat(chatId, model, prompt, List.of(), null);
+    }
+
+    public Flux<String> chat(String chatId, String model, String prompt, List<ChatAttachment> attachments, User user) {
 
         log.debug("chat model is: {}", model);
 
-        // check if model == "deepseek-r1", output reasoning content.
-        if (Objects.equals("deepseek-r1", model)) {
-            // add reasoning content advisor.
-            chatClient.prompt().advisors(reasoningContentAdvisor);
+        if (chatAttachmentService.hasImageAttachment(attachments) && canUseNativeOpenAiStream()) {
+            return nativeOpenAiChat(chatId, model, prompt, attachments, user, false);
         }
+
+        String scene = "AIChatService.chat";
+        String requestId = LlmLogHelper.newRequestId();
+        long startedAtNanos = System.nanoTime();
+        boolean ragEnabled = embeddingProperties.isEnabled();
+        LlmLogHelper.logRequest(log, requestId, scene,
+                buildChatLogRequest(chatId, model, prompt, attachments, false, ragEnabled));
+
         var runtimeOptions = buildRuntimeOptions(model);
 
         var promptSpec = chatClient.prompt()
@@ -85,12 +157,16 @@ public class AIChatService {
                         .param(ChatMemory.CONVERSATION_ID, chatId)
                 );
 
-        if (!embeddingProperties.isEnabled()) {
-            log.debug("Skip chat RAG advisor because app.ai.embedding.enabled=false.");
-            return promptSpec.stream().content();
+        if (supportsReasoningContent(model)) {
+            promptSpec = promptSpec.advisors(reasoningContentAdvisor);
         }
 
-        return promptSpec.advisors(
+        if (!embeddingProperties.isEnabled()) {
+            log.debug("Skip chat RAG advisor because app.ai.embedding.enabled=false.");
+            return LlmLogHelper.logStringStream(log, requestId, scene, promptSpec.stream().content(), startedAtNanos);
+        }
+
+        promptSpec = promptSpec.advisors(
                         QuestionAnswerAdvisor
                                 .builder(vectorStoreDelegate.getVectorStore("redis"))
                                 .searchRequest(
@@ -101,21 +177,408 @@ public class AIChatService {
                                                 .build()
                                 )
                                 .build()
-                )
-                .stream()
-                .content();
+                );
+
+        return LlmLogHelper.logStringStream(log, requestId, scene, promptSpec.stream().content(), startedAtNanos);
+    }
+
+    public Flux<String> chatWithSystemPrompt(String chatId, String model, String systemPrompt, String prompt,
+                                             List<ChatAttachment> attachments, User user) {
+        return chatWithSystemPromptInternal(chatId, model, systemPrompt, prompt, attachments, user,
+                null, true, "AIChatService.chatWithSystemPrompt");
+    }
+
+    public Flux<String> chatWithSystemPromptAndTools(String chatId, String model, String systemPrompt, String prompt,
+                                                     List<ChatAttachment> attachments, User user,
+                                                     ToolCallbackProvider toolCallbackProvider) {
+        return chatWithSystemPromptInternal(chatId, model, systemPrompt, prompt, attachments, user,
+                toolCallbackProvider, false, "AIChatService.chatWithSystemPromptAndTools");
+    }
+
+    private Flux<String> chatWithSystemPromptInternal(String chatId, String model, String systemPrompt, String prompt,
+                                                      List<ChatAttachment> attachments, User user,
+                                                      ToolCallbackProvider toolCallbackProvider,
+                                                      boolean allowNativeImageStream,
+                                                      String scene) {
+        if (!StringUtils.hasText(systemPrompt)) {
+            return chat(chatId, model, prompt, attachments, user);
+        }
+
+        log.debug("agent chat model is: {}", model);
+
+        if (allowNativeImageStream && chatAttachmentService.hasImageAttachment(attachments) && canUseNativeOpenAiStream()) {
+            return nativeOpenAiChat(chatId, model, prompt, attachments, user, false, systemPrompt);
+        }
+
+        String requestId = LlmLogHelper.newRequestId();
+        long startedAtNanos = System.nanoTime();
+        boolean ragEnabled = embeddingProperties.isEnabled();
+        LlmLogHelper.logRequest(log, requestId, scene,
+                buildChatLogRequest(chatId, model, prompt, attachments, false, ragEnabled, systemPrompt));
+
+        var promptSpec = systemPromptChatClient.prompt()
+                .options(buildRuntimeOptions(model))
+                .system(systemPrompt)
+                .user(prompt)
+                .advisors(memoryAdvisor -> memoryAdvisor
+                        .param(ChatMemory.CONVERSATION_ID, chatId)
+                );
+
+        if (toolCallbackProvider != null) {
+            promptSpec = promptSpec.toolCallbacks(toolCallbackProvider);
+        }
+
+        if (supportsReasoningContent(model)) {
+            promptSpec = promptSpec.advisors(reasoningContentAdvisor);
+        }
+
+        if (!embeddingProperties.isEnabled()) {
+            log.debug("Skip agent chat RAG advisor because app.ai.embedding.enabled=false.");
+            return LlmLogHelper.logStringStream(log, requestId, scene, promptSpec.stream().content(), startedAtNanos);
+        }
+
+        promptSpec = promptSpec.advisors(
+                QuestionAnswerAdvisor
+                        .builder(vectorStoreDelegate.getVectorStore("redis"))
+                        .searchRequest(
+                                SearchRequest.builder()
+                                        .topK(6)
+                                        .build()
+                        )
+                        .build()
+        );
+
+        return LlmLogHelper.logStringStream(log, requestId, scene, promptSpec.stream().content(), startedAtNanos);
     }
 
     public Flux<String> deepThinkingChat(String chatId, String model, String prompt) {
+        return deepThinkingChat(chatId, model, prompt, List.of(), null);
+    }
 
-        return chatClient.prompt()
+    public Flux<String> deepThinkingChat(String chatId, String model, String prompt, List<ChatAttachment> attachments, User user) {
+
+        if ((supportsQwenReasoningStream(model) || chatAttachmentService.hasImageAttachment(attachments)) && canUseNativeOpenAiStream()) {
+            return nativeOpenAiChat(chatId, model, prompt, attachments, user, true);
+        }
+
+        String scene = "AIChatService.deepThinkingChat";
+        String requestId = LlmLogHelper.newRequestId();
+        long startedAtNanos = System.nanoTime();
+        LlmLogHelper.logRequest(log, requestId, scene,
+                buildChatLogRequest(chatId, model, prompt, attachments, true, false));
+
+        var promptSpec = chatClient.prompt()
                 .options(buildRuntimeOptions(model))
                 .system(deepThinkPromptTemplate.getTemplate())
                 .user(prompt)
                 .advisors(memoryAdvisor -> memoryAdvisor
                         .param(ChatMemory.CONVERSATION_ID, chatId)
-                ).stream()
-                .content();
+                );
+
+        promptSpec = promptSpec.advisors(reasoningContentAdvisor);
+
+        return LlmLogHelper.logStringStream(log, requestId, scene, promptSpec.stream().content(), startedAtNanos);
+    }
+
+    private Flux<String> nativeOpenAiChat(
+            String chatId,
+            String model,
+            String prompt,
+            List<ChatAttachment> attachments,
+            User user,
+            boolean deepThinking
+    ) {
+        return nativeOpenAiChat(chatId, model, prompt, attachments, user, deepThinking, null);
+    }
+
+    private Flux<String> nativeOpenAiChat(
+            String chatId,
+            String model,
+            String prompt,
+            List<ChatAttachment> attachments,
+            User user,
+            boolean deepThinking,
+            String systemPromptOverride
+    ) {
+        AtomicReference<String> finalAnswer = new AtomicReference<>("");
+        AtomicReference<String> fullResponse = new AtomicReference<>("");
+        String scene = StringUtils.hasText(systemPromptOverride)
+                ? "AIChatService.chatWithSystemPrompt.native"
+                : deepThinking ? "AIChatService.deepThinkingChat.native" : "AIChatService.chat.native";
+        String requestId = LlmLogHelper.newRequestId();
+        long startedAtNanos = System.nanoTime();
+
+        return Flux.<String>create(sink -> {
+                    AtomicBoolean inThinking = new AtomicBoolean(false);
+                    try {
+                        String chatCompletionsUrl = openAiChatCompletionsUrl();
+                        Map<String, Object> nativeRequest =
+                                buildNativeChatRequest(chatId, model, prompt, attachments, user, deepThinking, systemPromptOverride);
+                        LlmLogHelper.logRequest(log, requestId, scene,
+                                buildNativeHttpLogRequest(chatCompletionsUrl, nativeRequest));
+                        String requestBody = JacksonConfig.OBJECT_MAPPER.writeValueAsString(nativeRequest);
+                        HttpRequest request = HttpRequest.newBuilder()
+                                .uri(URI.create(chatCompletionsUrl))
+                                .timeout(Duration.ofMinutes(5))
+                                .header("Content-Type", "application/json")
+                                .header("Accept", "text/event-stream")
+                                .header("Authorization", "Bearer " + openAiApiKey)
+                                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                                .build();
+
+                        HttpResponse<Stream<String>> response = openAiHttpClient.send(request, HttpResponse.BodyHandlers.ofLines());
+                        if (response.statusCode() >= 400) {
+                            String errorBody;
+                            try (Stream<String> lines = response.body()) {
+                                errorBody = lines.collect(Collectors.joining("\n"));
+                            }
+                            LlmLogHelper.logResponse(log, requestId, scene,
+                                    buildNativeHttpLogResponse(response.statusCode(), errorBody), startedAtNanos);
+                            sink.error(new IllegalStateException("本地模型请求失败，HTTP " + response.statusCode()));
+                            return;
+                        }
+
+                        try (Stream<String> lines = response.body()) {
+                            var iterator = lines.iterator();
+                            while (!sink.isCancelled() && iterator.hasNext()) {
+                                String line = iterator.next();
+                                if (!line.startsWith("data:")) {
+                                    continue;
+                                }
+                                String data = line.substring("data:".length()).trim();
+                                if ("[DONE]".equals(data)) {
+                                    break;
+                                }
+                                emitNativeChatChunk(data, inThinking, finalAnswer, fullResponse, sink);
+                            }
+                        }
+
+                        if (inThinking.get() && !sink.isCancelled()) {
+                            emitText("</think>", fullResponse, sink);
+                        }
+                        if (!sink.isCancelled()) {
+                            sink.complete();
+                        }
+                    } catch (Exception e) {
+                        if (!sink.isCancelled()) {
+                            sink.error(e);
+                        }
+                    }
+                })
+                .doOnComplete(() -> LlmLogHelper.logResponse(log, requestId, scene,
+                        buildNativeStreamLogResponse(finalAnswer.get(), fullResponse.get()), startedAtNanos))
+                .doOnComplete(() -> saveNativeChatMemory(chatId, prompt, finalAnswer.get(), fullResponse.get()))
+                .doOnError(error -> LlmLogHelper.logError(log, requestId, scene,
+                        buildNativeStreamLogResponse(finalAnswer.get(), fullResponse.get()), startedAtNanos, error))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private Map<String, Object> buildChatLogRequest(
+            String chatId,
+            String model,
+            String prompt,
+            List<ChatAttachment> attachments,
+            boolean deepThinking,
+            boolean ragEnabled
+    ) {
+        return buildChatLogRequest(chatId, model, prompt, attachments, deepThinking, ragEnabled, null);
+    }
+
+    private Map<String, Object> buildChatLogRequest(
+            String chatId,
+            String model,
+            String prompt,
+            List<ChatAttachment> attachments,
+            boolean deepThinking,
+            boolean ragEnabled,
+            String systemPrompt
+    ) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("chat_id", chatId);
+        request.put("model", StringUtils.hasText(model) ? model : defaultChatModel);
+        if (StringUtils.hasText(systemPrompt)) {
+            request.put("system_prompt", systemPrompt);
+        }
+        request.put("prompt", prompt);
+        request.put("deep_thinking", deepThinking);
+        request.put("rag_enabled", ragEnabled);
+        request.put("attachment_count", attachments == null ? 0 : attachments.size());
+        return request;
+    }
+
+    private Map<String, Object> buildNativeHttpLogRequest(String url, Map<String, Object> body) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("url", url);
+        request.put("body", body);
+        return request;
+    }
+
+    private Map<String, Object> buildNativeHttpLogResponse(int statusCode, String body) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("status_code", statusCode);
+        response.put("body", body);
+        return response;
+    }
+
+    private Map<String, Object> buildNativeStreamLogResponse(String finalAnswer, String fullResponse) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("final_answer", finalAnswer);
+        response.put("full_response", fullResponse);
+        return response;
+    }
+
+    private Map<String, Object> buildNativeChatRequest(
+            String chatId,
+            String model,
+            String prompt,
+            List<ChatAttachment> attachments,
+            User user,
+            boolean deepThinking,
+            String systemPromptOverride
+    ) {
+        Map<String, Object> request = new HashMap<>();
+        request.put("model", StringUtils.hasText(model) ? model : defaultChatModel);
+        request.put("stream", true);
+        request.put("temperature", 0.8);
+        if (deepThinking && supportsQwenReasoningStream(model)) {
+            request.put("chat_template_kwargs", Map.of("enable_thinking", true));
+        }
+        request.put("messages", buildNativeMessages(chatId, model, prompt, attachments, user, deepThinking, systemPromptOverride));
+        return request;
+    }
+
+    private List<Map<String, Object>> buildNativeMessages(
+            String chatId,
+            String model,
+            String prompt,
+            List<ChatAttachment> attachments,
+            User user,
+            boolean deepThinking,
+            String systemPromptOverride
+    ) {
+        List<Map<String, Object>> messages = new ArrayList<>();
+        String systemPrompt = StringUtils.hasText(systemPromptOverride)
+                ? systemPromptOverride
+                : nativeSystemPrompt(model, deepThinking);
+        messages.add(Map.of("role", "system", "content", systemPrompt));
+
+        if (StringUtils.hasText(chatId)) {
+            for (Message message : chatMemory.get(chatId)) {
+                String role = toOpenAiRole(message);
+                if (!StringUtils.hasText(role) || !StringUtils.hasText(message.getText())) {
+                    continue;
+                }
+                messages.add(Map.of("role", role, "content", message.getText()));
+            }
+        }
+
+        List<Map<String, Object>> imageParts = chatAttachmentService.buildOpenAiImageContentParts(attachments, user);
+        if (imageParts.isEmpty()) {
+            messages.add(Map.of("role", "user", "content", prompt));
+        } else {
+            List<Map<String, Object>> contentParts = new ArrayList<>();
+            contentParts.add(Map.of("type", "text", "text", prompt));
+            contentParts.addAll(imageParts);
+            messages.add(Map.of("role", "user", "content", contentParts));
+        }
+        return messages;
+    }
+
+    private void emitNativeChatChunk(
+            String data,
+            AtomicBoolean inThinking,
+            AtomicReference<String> finalAnswer,
+            AtomicReference<String> fullResponse,
+            reactor.core.publisher.FluxSink<String> sink
+    ) throws Exception {
+        JsonNode root = JacksonConfig.OBJECT_MAPPER.readTree(data);
+        JsonNode choices = root.path("choices");
+        if (!choices.isArray() || choices.isEmpty()) {
+            return;
+        }
+
+        JsonNode delta = choices.get(0).path("delta");
+        String reasoningContent = firstText(delta, "reasoning_content", "reasoningContent");
+        String content = firstText(delta, "content");
+
+        if (hasContent(reasoningContent)) {
+            if (inThinking.compareAndSet(false, true)) {
+                emitText("<think>", fullResponse, sink);
+            }
+            emitText(reasoningContent, fullResponse, sink);
+        }
+
+        if (hasContent(content)) {
+            if (inThinking.compareAndSet(true, false)) {
+                emitText("</think>", fullResponse, sink);
+            }
+            finalAnswer.getAndAccumulate(content, String::concat);
+            emitText(content, fullResponse, sink);
+        }
+    }
+
+    private void emitText(String text, AtomicReference<String> fullResponse, reactor.core.publisher.FluxSink<String> sink) {
+        if (!hasContent(text) || sink.isCancelled()) {
+            return;
+        }
+        fullResponse.getAndAccumulate(text, String::concat);
+        sink.next(text);
+    }
+
+    private boolean hasContent(String text) {
+        return text != null && !text.isEmpty();
+    }
+
+    private String firstText(JsonNode node, String... fieldNames) {
+        for (String fieldName : fieldNames) {
+            JsonNode value = node.path(fieldName);
+            if (value.isTextual()) {
+                return value.asText();
+            }
+        }
+        return "";
+    }
+
+    private void saveNativeChatMemory(String chatId, String prompt, String finalAnswer, String fullResponse) {
+        if (!StringUtils.hasText(chatId)) {
+            return;
+        }
+        String assistantText = StringUtils.hasText(finalAnswer) ? finalAnswer : fullResponse;
+        chatMemory.add(chatId, List.of(new UserMessage(prompt), new AssistantMessage(assistantText)));
+    }
+
+    private String openAiChatCompletionsUrl() {
+        String normalizedBaseUrl = openAiBaseUrl.trim();
+        while (normalizedBaseUrl.endsWith("/")) {
+            normalizedBaseUrl = normalizedBaseUrl.substring(0, normalizedBaseUrl.length() - 1);
+        }
+        if (normalizedBaseUrl.endsWith("/v1")) {
+            return normalizedBaseUrl + "/chat/completions";
+        }
+        return normalizedBaseUrl + "/v1/chat/completions";
+    }
+
+    private String toOpenAiRole(Message message) {
+        return switch (message.getMessageType()) {
+            case USER -> "user";
+            case ASSISTANT -> "assistant";
+            case SYSTEM -> "system";
+            default -> null;
+        };
+    }
+
+    private String nativeSystemPrompt(String model, boolean deepThinking) {
+        if (!deepThinking) {
+            return "You are a helpful AI assistant.";
+        }
+        if (supportsQwenReasoningStream(model)) {
+            return QWEN_NATIVE_DEEP_THINK_SYSTEM_PROMPT;
+        }
+        return """
+                You are a thoughtful AI assistant. Think carefully before answering.
+                If the runtime exposes reasoning metadata, use it. Otherwise answer directly and clearly
+                without inventing hidden reasoning text.
+                """;
     }
 
     private OpenAiChatOptions buildRuntimeOptions(String model) {
@@ -125,5 +588,25 @@ public class AIChatService {
             builder.model(model);
         }
         return builder.build();
+    }
+
+    private boolean supportsReasoningContent(String model) {
+        if (!StringUtils.hasText(model)) {
+            return false;
+        }
+        String normalizedModel = model.toLowerCase(Locale.ROOT);
+        return normalizedModel.contains("deepseek-r1") || normalizedModel.contains("deepseek-reasoner");
+    }
+
+    private boolean supportsQwenReasoningStream(String model) {
+        String normalizedModel = StringUtils.hasText(model) ? model : defaultChatModel;
+        if (!StringUtils.hasText(normalizedModel)) {
+            return false;
+        }
+        return normalizedModel.toLowerCase(Locale.ROOT).contains("qwen3");
+    }
+
+    private boolean canUseNativeOpenAiStream() {
+        return StringUtils.hasText(openAiBaseUrl) && StringUtils.hasText(openAiApiKey);
     }
 }
