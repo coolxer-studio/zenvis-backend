@@ -1,7 +1,12 @@
 package com.coolxer.configuration.mcp;
 
-import com.coolxer.controller.system.AnalysisTaskMcpTool;
+import com.coolxer.controller.policy.ConfigMcpTool;
+import com.coolxer.controller.policy.PolicyConfigValidationMcpTool;
 import com.coolxer.controller.retrieval.RetrievalMcpTool;
+import com.coolxer.controller.system.AnalysisTaskMcpTool;
+import com.coolxer.controller.system.DashboardMcpTool;
+import com.coolxer.controller.system.MenuMcpTool;
+import com.coolxer.controller.system.PushTaskMcpTool;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.method.MethodToolCallbackProvider;
@@ -20,15 +25,26 @@ public class McpServerToolConfiguration {
 
     @Bean
     public MethodToolCallbackProvider retrievalToolCallbackProvider(RetrievalMcpTool retrievalMcpTool,
-                                                                    AnalysisTaskMcpTool analysisTaskMcpTool) {
+                                                                    AnalysisTaskMcpTool analysisTaskMcpTool,
+                                                                    PushTaskMcpTool pushTaskMcpTool,
+                                                                    ConfigMcpTool configMcpTool,
+                                                                    PolicyConfigValidationMcpTool policyConfigValidationMcpTool,
+                                                                    MenuMcpTool menuMcpTool,
+                                                                    DashboardMcpTool dashboardMcpTool) {
         log.info("=== Creating MethodToolCallbackProvider for MCP tools ===");
 
         logToolMethods(RetrievalMcpTool.class);
         logToolMethods(AnalysisTaskMcpTool.class);
+        logToolMethods(PushTaskMcpTool.class);
+        logToolMethods(ConfigMcpTool.class);
+        logToolMethods(PolicyConfigValidationMcpTool.class);
+        logToolMethods(MenuMcpTool.class);
+        logToolMethods(DashboardMcpTool.class);
 
         // 创建 MethodToolCallbackProvider
         MethodToolCallbackProvider provider = MethodToolCallbackProvider.builder()
-                .toolObjects(retrievalMcpTool, analysisTaskMcpTool)
+                .toolObjects(retrievalMcpTool, analysisTaskMcpTool, pushTaskMcpTool, configMcpTool,
+                        policyConfigValidationMcpTool, menuMcpTool, dashboardMcpTool)
                 .build();
 
         log.info("=== MethodToolCallbackProvider created successfully ===");

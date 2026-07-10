@@ -123,7 +123,7 @@ ZenVis = **配置化数据存储 + 可视化引擎 + 检索分析 + 插件扩展
 | 检索引擎    | 数据检索、过滤、排序      |
 | 聚合服务    | 数据聚合、统计、分析      |
 | 配置服务    | 配置管理、动态配置       |
-| AI 智能分析 | NL2SQL、RAG、智能问答 |
+| AI 智能分析 | RAG、MCP 工具调用、智能问答 |
 
 #### 3. 数据层
 
@@ -238,14 +238,32 @@ PUSH_IMAGE=true ./build.sh
 | `server.port`                            | `11001`     | 服务端口                  |
 | `spring.datasource.mysql.jdbc-url`       | -           | MySQL 连接地址            |
 | `spring.datasource.clickhouse.jdbc-url`  | -           | ClickHouse 连接地址       |
+| `MYSQL_PASSWORD`                         | -           | MySQL 密码，通过环境变量或本地密钥文件注入 |
+| `CLICKHOUSE_PASSWORD`                    | -           | ClickHouse 密码，通过环境变量或本地密钥文件注入 |
+| `REDIS_PASSWORD`                         | -           | Redis 密码，通过环境变量或本地密钥文件注入 |
 | `spring.data.redis.host`                 | `localhost` | Redis 主机地址            |
 | `spring.data.redis.port`                 | `6379`      | Redis 端口              |
+| `spring.ai.openai.base-url`              | -           | OpenAI 兼容模型服务地址；未配置不影响启动，调用 AI 功能时报错 |
 | `spring.ai.openai.api-key`               | -           | OpenAI API Key           |
 | `app.security.mcp.bearer-token`          | -           | MCP Server Bearer Token，未配置时 MCP 接口返回 401 |
 | `spring.servlet.multipart.max-file-size` | `300MB`     | 最大上传文件大小              |
 | `server.servlet.session.timeout`         | `3600S`     | 会话超时时间                |
 
 MCP 客户端访问 Spring AI MCP Server 接口时需要携带请求头：`Authorization: Bearer <app.security.mcp.bearer-token>`。
+
+本地开发不要把数据库、Redis、LLM 或 MCP 密钥写入已提交的 profile 配置。可以使用环境变量，也可以在 `zenvis-backend/config/local-secrets.properties` 中放本机密钥；该文件已加入 `.gitignore`，应用启动时会自动读取。例如：
+
+```properties
+MYSQL_PASSWORD=your_mysql_password
+CLICKHOUSE_PASSWORD=your_clickhouse_password
+REDIS_PASSWORD=your_redis_password
+OPENAI_BASE_URL=https://your-llm-endpoint
+OPENAI_API_KEY=your_api_key
+OPENAI_CHAT_MODEL=your_chat_model
+MCP_BEARER_TOKEN=your_mcp_token
+```
+
+如果启动时报 `DB::Exception: default: Authentication failed` 且连接地址是 ClickHouse，请先确认 `CLICKHOUSE_PASSWORD` 已按上述方式注入，并且与本机 ClickHouse `default` 用户密码一致。
 
 ### 数据库初始化
 
@@ -374,9 +392,8 @@ zenvis-backend/
 | :-------- | :--------------------------- | :--------------- |
 | AI 聊天     | `ChatController`             | 智能聊天接口，支持自然语言查询  |
 | 聊天会话管理    | `ChatSessionController`      | 会话生命周期管理         |
-| NL2SQL 查询 | `DihController`              | 自然语言转SQL查询       |
-| 向量存储查询    | `VectorStoreQueryController` | 向量检索接口           |
-| 智能巡检Agent | `InspectionAgent`            | ReAct模式智能巡检Agent |
+| RAG 文档管理 | `VectorStoreQueryController` | 插件文档向量管理和相似度搜索 |
+| 数据可视化Agent | `DataVisualizationAgent`     | retrieval MCP 只读可视化分析 |
 
 ### 检索引擎
 

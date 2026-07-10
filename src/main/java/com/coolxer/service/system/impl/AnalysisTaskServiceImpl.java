@@ -10,7 +10,12 @@ import com.coolxer.model.system.dto.AnalysisTaskDto;
 import com.coolxer.model.system.dto.AnalysisTaskSearchDto;
 import com.coolxer.model.system.vo.AnalysisTaskQueueVo;
 import com.coolxer.model.system.vo.AnalysisTaskVo;
-import com.coolxer.service.dih.agent.nl2sql.service.LlmService;
+import com.coolxer.service.dih.AIBaseService;
+import com.coolxer.service.dih.AgentLlmService;
+import com.coolxer.service.dih.agent.skill.BuiltinAgentSkillRegistry;
+import com.coolxer.service.dih.agent.skill.SkillService;
+import com.coolxer.service.dih.mcp.AgentMcpToolService;
+import com.coolxer.service.dih.mcp.McpToolContext;
 import com.coolxer.service.system.AnalysisTaskService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -47,7 +52,16 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
     private AnalysisTaskRepository analysisTaskRepository;
 
     @Autowired
-    private LlmService llmService;
+    private AgentLlmService agentLlmService;
+
+    @Autowired
+    private AIBaseService aiBaseService;
+
+    @Autowired
+    private AgentMcpToolService agentMcpToolService;
+
+    @Autowired
+    private SkillService skillService;
 
     @Override
     public List<AnalysisTaskVo> findAll() {
@@ -243,13 +257,24 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
     }
 
     private String callAiAnalyze(AnalysisTask analysisTask) {
-        String model = normalizeModel(analysisTask.getModel());
+        String model = aiBaseService.resolveChatModel(analysisTask.getModel(), false, false);
+        McpToolContext mcpToolContext = agentMcpToolService.resolve("agent_analysis");
         try {
-            llmService.setModel(model);
-            return llmService.callWithSystemPrompt(ANALYSIS_SYSTEM_PROMPT, buildAnalyzePrompt(analysisTask));
+            agentLlmService.setModel(model);
+            agentLlmService.setMcpToolContext(mcpToolContext);
+            return agentLlmService.callWithSystemPrompt(buildAnalysisSystemPrompt(), buildAnalyzePrompt(analysisTask));
         } finally {
-            llmService.clearModel();
+            agentLlmService.clearModel();
+            agentLlmService.clearMcpToolContext();
         }
+    }
+
+    private String buildAnalysisSystemPrompt() {
+        String skillPrompt = skillService.buildEnabledSkillPrompt(BuiltinAgentSkillRegistry.AGENT_ANALYSIS);
+        if (StringUtils.isBlank(skillPrompt)) {
+            return ANALYSIS_SYSTEM_PROMPT;
+        }
+        return ANALYSIS_SYSTEM_PROMPT + "\n\n【已加载 Skill】\n" + skillPrompt;
     }
 
     private String buildAnalyzePrompt(AnalysisTask analysisTask) {
@@ -282,13 +307,6 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
 
     private static Integer defaultRunCount(Integer runCount) {
         return runCount == null ? 0 : runCount;
-    }
-
-    private static String normalizeModel(String model) {
-        if (StringUtils.isBlank(model) || "auto".equals(model) || "x-sage-v1".equals(model)) {
-            return null;
-        }
-        return model;
     }
 
     private static String blankToNull(String value) {

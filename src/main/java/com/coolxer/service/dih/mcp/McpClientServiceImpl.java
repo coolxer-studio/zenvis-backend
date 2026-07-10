@@ -31,16 +31,20 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
+import java.net.InetAddress;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.zip.CRC32;
 
 /**
  * 数据库驱动的 MCP 客户端注册表。
@@ -58,13 +62,19 @@ public class McpClientServiceImpl implements McpClientService {
     private final ObjectMapper objectMapper;
     private final ConcurrentHashMap<Integer, ClientHolder> clients = new ConcurrentHashMap<>();
     private final String clientVersion;
+    private final boolean allowPrivateServerUrls;
+    private final boolean allowDestructiveToolCalls;
 
     public McpClientServiceImpl(McpServerConfigRepository mcpServerConfigRepository,
                                 ObjectMapper objectMapper,
-                                @Value("${spring.ai.mcp.server.version:1.0.0}") String clientVersion) {
+                                @Value("${spring.ai.mcp.server.version:1.0.0}") String clientVersion,
+                                @Value("${app.ai.mcp.allow-private-server-urls:true}") boolean allowPrivateServerUrls,
+                                @Value("${app.ai.mcp.allow-destructive-tool-calls:false}") boolean allowDestructiveToolCalls) {
         this.mcpServerConfigRepository = mcpServerConfigRepository;
         this.objectMapper = objectMapper;
         this.clientVersion = clientVersion;
+        this.allowPrivateServerUrls = allowPrivateServerUrls;
+        this.allowDestructiveToolCalls = allowDestructiveToolCalls;
     }
 
     @PostConstruct
@@ -230,27 +240,54 @@ public class McpClientServiceImpl implements McpClientService {
             throw new ApiException(ResultCodeEnum.FIELD_IS_EMPTY);
         }
         ClientHolder holder = resolveHolder(callDto);
+        McpSchema.Tool tool = holder.findTool(callDto.getName());
+        if (!allowDestructiveToolCalls && isDestructiveTool(tool)) {
+            throw new ApiException(ResultCodeEnum.NO_AUTHORITY.getCode(), "破坏性MCP工具调用未启用");
+        }
         Map<String, Object> arguments = callDto.getArguments() == null ? Map.of() : callDto.getArguments();
-        return holder.getClient().callTool(new McpSchema.CallToolRequest(callDto.getName(), arguments));
+        long startedAt = System.nanoTime();
+        log.info("MCP工具测试调用开始: serverCode={}, tool={}, arguments={}",
+                holder.getServerCode(), callDto.getName(), summarizeObject(arguments));
+        try {
+            Object result = holder.getClient().callTool(new McpSchema.CallToolRequest(callDto.getName(), arguments));
+            log.info("MCP工具测试调用成功: serverCode={}, tool={}, durationMs={}, result={}",
+                    holder.getServerCode(), callDto.getName(), elapsedMillis(startedAt), summarizeObject(result));
+            return result;
+        } catch (RuntimeException e) {
+            log.warn("MCP工具测试调用失败: serverCode={}, tool={}, durationMs={}, error={}",
+                    holder.getServerCode(), callDto.getName(), elapsedMillis(startedAt), e.getMessage(), e);
+            throw e;
+        }
     }
 
     @Override
     public boolean hasAvailableTools() {
-        return clients.values().stream().anyMatch(holder -> !holder.getTools().isEmpty());
+        return hasAvailableTools(null);
+    }
+
+    @Override
+    public boolean hasAvailableTools(List<String> serverCodes) {
+        return activeHolders(serverCodes).stream().anyMatch(holder -> !holder.getTools().isEmpty());
     }
 
     @Override
     public String buildEnabledMcpPrompt() {
+        return buildEnabledMcpPrompt(null);
+    }
+
+    @Override
+    public String buildEnabledMcpPrompt(List<String> serverCodes) {
         StringBuilder prompt = new StringBuilder();
-        List<ClientHolder> holders = clients.values().stream()
-                .sorted((left, right) -> left.getServerId().compareTo(right.getServerId()))
-                .toList();
+        List<ClientHolder> holders = activeHolders(serverCodes);
 
         for (ClientHolder holder : holders) {
             StringBuilder block = new StringBuilder();
             block.append("### MCP服务：").append(holder.getServerName())
                     .append(" (").append(holder.getServerCode()).append(")\n");
             for (McpSchema.Tool tool : holder.getTools()) {
+                if (!allowDestructiveToolCalls && isDestructiveTool(tool)) {
+                    continue;
+                }
                 block.append("- ").append(holder.aiToolName(tool))
                         .append("：")
                         .append(StringUtils.defaultIfBlank(tool.description(), StringUtils.defaultIfBlank(tool.title(), tool.name())))
@@ -271,8 +308,13 @@ public class McpClientServiceImpl implements McpClientService {
 
     @Override
     public ToolCallbackProvider getToolCallbackProvider() {
+        return getToolCallbackProvider(null);
+    }
+
+    @Override
+    public ToolCallbackProvider getToolCallbackProvider(List<String> serverCodes) {
         return SyncMcpToolCallbackProvider.builder()
-                .mcpClients(getActiveClients())
+                .mcpClients(getActiveClients(serverCodes))
                 .toolNamePrefixGenerator((connectionInfo, tool) -> {
                     String prefix = connectionInfo.clientInfo() == null
                             ? "mcp"
@@ -284,10 +326,36 @@ public class McpClientServiceImpl implements McpClientService {
 
     @Override
     public List<McpSyncClient> getActiveClients() {
-        return clients.values().stream()
-                .sorted((left, right) -> left.getServerId().compareTo(right.getServerId()))
+        return getActiveClients(null);
+    }
+
+    @Override
+    public List<McpSyncClient> getActiveClients(List<String> serverCodes) {
+        return activeHolders(serverCodes).stream()
                 .map(ClientHolder::getClient)
                 .toList();
+    }
+
+    private List<ClientHolder> activeHolders(List<String> serverCodes) {
+        Set<String> scope = normalizeServerCodes(serverCodes);
+        return clients.values().stream()
+                .filter(holder -> scope.isEmpty() || scope.contains(holder.getServerCode()))
+                .sorted((left, right) -> left.getServerId().compareTo(right.getServerId()))
+                .toList();
+    }
+
+    private Set<String> normalizeServerCodes(List<String> serverCodes) {
+        if (serverCodes == null || serverCodes.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> normalized = new LinkedHashSet<>();
+        for (String serverCode : serverCodes) {
+            String value = normalizeCodeLenient(serverCode);
+            if (StringUtils.isNotBlank(value)) {
+                normalized.add(value);
+            }
+        }
+        return normalized;
     }
 
     private void refreshEnabledServers() {
@@ -303,6 +371,7 @@ public class McpClientServiceImpl implements McpClientService {
     }
 
     private McpSyncClient createClient(McpServerConfig config) {
+        validateBaseUrl(config.getBaseUrl());
         Map<String, String> headers = parseHeaders(config.getHeaders());
         HttpClientSseClientTransport.Builder transportBuilder = HttpClientSseClientTransport.builder(config.getBaseUrl())
                 .sseEndpoint(config.getSseEndpoint())
@@ -386,16 +455,34 @@ public class McpClientServiceImpl implements McpClientService {
         return holder == null ? 0 : holder.getTools().size();
     }
 
-    private static void checkCreateOrUpdate(McpServerDto dto) {
+    private void checkCreateOrUpdate(McpServerDto dto) {
         if (dto == null
                 || StringUtils.isBlank(dto.getCode())
                 || StringUtils.isBlank(dto.getName())
                 || StringUtils.isBlank(dto.getBaseUrl())) {
             throw new ApiException(ResultCodeEnum.FIELD_IS_EMPTY);
         }
+        validateBaseUrl(dto.getBaseUrl());
+    }
+
+    private void validateBaseUrl(String baseUrl) {
         try {
-            URI.create(dto.getBaseUrl());
+            URI uri = URI.create(StringUtils.trimToEmpty(baseUrl));
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                throw new ApiException(ResultCodeEnum.NO_SUPPORTED.getCode(), "MCP服务地址仅支持 http/https");
+            }
+            if (StringUtils.isBlank(host)) {
+                throw new ApiException(ResultCodeEnum.NO_SUPPORTED.getCode(), "MCP服务地址缺少host");
+            }
+            if (!allowPrivateServerUrls && isPrivateOrLocalHost(host)) {
+                throw new ApiException(ResultCodeEnum.NO_AUTHORITY.getCode(), "MCP服务地址不允许指向本机或内网地址");
+            }
         } catch (Exception e) {
+            if (e instanceof ApiException apiException) {
+                throw apiException;
+            }
             throw new ApiException(ResultCodeEnum.NO_SUPPORTED.getCode(), "MCP服务地址格式不正确");
         }
     }
@@ -420,6 +507,11 @@ public class McpClientServiceImpl implements McpClientService {
             throw new ApiException(ResultCodeEnum.NO_SUPPORTED.getCode(), "MCP服务标识不能超过64个字符");
         }
         return normalized;
+    }
+
+    private static String normalizeCodeLenient(String code) {
+        return StringUtils.trimToEmpty(code)
+                .replaceAll("[^a-zA-Z0-9._-]", "_");
     }
 
     private static String normalizeEndpoint(String endpoint) {
@@ -448,9 +540,68 @@ public class McpClientServiceImpl implements McpClientService {
         return StringUtils.defaultIfBlank(serverInfo.title(), serverInfo.name());
     }
 
+    private static boolean isDestructiveTool(McpSchema.Tool tool) {
+        return tool != null
+                && tool.annotations() != null
+                && Boolean.TRUE.equals(tool.annotations().destructiveHint());
+    }
+
+    private static boolean isPrivateOrLocalHost(String host) throws Exception {
+        String normalizedHost = StringUtils.trimToEmpty(host).toLowerCase();
+        if ("localhost".equals(normalizedHost) || normalizedHost.endsWith(".localhost")) {
+            return true;
+        }
+        for (InetAddress address : InetAddress.getAllByName(host)) {
+            if (address.isAnyLocalAddress()
+                    || address.isLoopbackAddress()
+                    || address.isLinkLocalAddress()
+                    || address.isSiteLocalAddress()
+                    || address.isMulticastAddress()) {
+                return true;
+            }
+            String hostAddress = address.getHostAddress();
+            if (hostAddress != null) {
+                String normalizedAddress = hostAddress.toLowerCase();
+                if (normalizedAddress.startsWith("fc") || normalizedAddress.startsWith("fd")) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private static String formatAiToolName(String serverCode, String toolName) {
         String formatted = McpToolUtils.format(serverCode + "_" + toolName);
-        return formatted.length() > 64 ? formatted.substring(formatted.length() - 64) : formatted;
+        if (formatted.length() <= 64) {
+            return formatted;
+        }
+        String hash = crc32Hex(formatted);
+        int prefixLength = 64 - hash.length() - 1;
+        return formatted.substring(0, Math.max(prefixLength, 0)) + "_" + hash;
+    }
+
+    private static String crc32Hex(String value) {
+        CRC32 crc32 = new CRC32();
+        crc32.update(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return Long.toHexString(crc32.getValue());
+    }
+
+    private long elapsedMillis(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000;
+    }
+
+    private String summarizeObject(Object value) {
+        if (value == null) {
+            return "";
+        }
+        String raw;
+        try {
+            raw = objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            raw = String.valueOf(value);
+        }
+        String normalized = raw.replace('\n', ' ').replace('\r', ' ').trim();
+        return normalized.length() <= 500 ? normalized : normalized.substring(0, 500) + "...";
     }
 
     @Data
@@ -487,6 +638,16 @@ public class McpClientServiceImpl implements McpClientService {
 
         private String aiToolName(McpSchema.Tool tool) {
             return formatAiToolName(serverCode, tool.name());
+        }
+
+        private McpSchema.Tool findTool(String toolName) {
+            if (StringUtils.isBlank(toolName) || tools == null) {
+                return null;
+            }
+            return tools.stream()
+                    .filter(tool -> toolName.equals(tool.name()))
+                    .findFirst()
+                    .orElse(null);
         }
 
         private void close() {

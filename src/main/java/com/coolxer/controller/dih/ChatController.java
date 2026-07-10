@@ -1,33 +1,27 @@
 package com.coolxer.controller.dih;
 
-import com.coolxer.commons.enums.MessageType;
+import com.coolxer.commons.enums.ResultCodeEnum;
 import com.coolxer.controller.BaseController;
 import com.coolxer.dao.mysql.entity.ChatSession;
 import com.coolxer.dao.mysql.entity.User;
 import com.coolxer.model.base.vo.ResponseWrap;
 import com.coolxer.model.dih.ChatAttachment;
 import com.coolxer.model.dih.ChatMessagePart;
-import com.coolxer.model.dih.ChatResponse;
-import com.coolxer.model.dih.ChatStreamEvent;
 import com.coolxer.model.dih.Message;
+import com.coolxer.model.dih.SuggestDto;
 import com.coolxer.model.dih.dto.ChatActionDecisionDto;
 import com.coolxer.model.dih.dto.ChatDto;
 import com.coolxer.model.dih.dto.ChatSessionDto;
 import com.coolxer.service.dih.AIBaseService;
-import com.coolxer.service.dih.AIChatService;
+import com.coolxer.service.dih.AIGeneralCompleteService;
 import com.coolxer.service.dih.ChatAttachmentService;
-import com.coolxer.service.dih.ChatMessagePartParser;
+import com.coolxer.service.dih.DihChatApplicationService;
 import com.coolxer.service.dih.ChatSessionService;
-import com.coolxer.service.dih.FixedPromptResponseService;
-import com.coolxer.service.dih.agent.DataAccessAgent;
-import com.coolxer.service.dih.agent.InspectionAgent;
-import com.coolxer.service.dih.agent.McpAgent;
 import com.coolxer.utils.JacksonUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
-import org.apache.commons.lang3.BooleanUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,14 +42,12 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import reactor.core.publisher.Flux;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * AI对答聊天服务
@@ -66,30 +58,30 @@ import java.util.concurrent.atomic.AtomicReference;
 public class ChatController extends BaseController {
 
     private static final Logger log = LoggerFactory.getLogger(ChatController.class);
-    private static final String RESPONSE_FORMAT_EVENTS = "events";
     private static final String DECISION_APPROVED = "approved";
     private static final String DECISION_REJECTED = "rejected";
+    private static final String DECISION_DISPOSE = "dispose";
+    private static final String DECISION_IGNORE = "ignore";
+    private static final String DECISION_CONTINUE = "continue";
+    private static final String DECISION_APPLY_CONFIG = "apply_config";
+    private static final String DECISION_ABANDON = "abandon";
+    private static final String DECISION_REVISE = "revise";
+    private static final String DECISION_SUBMITTED = "submitted";
 
     @Autowired
-    private AIChatService chatService;
+    private DihChatApplicationService dihChatApplicationService;
+
+    @Autowired
+    private ChatSessionService chatSessionService;
+
+    @Autowired
+    private ChatAttachmentService chatAttachmentService;
 
     @Autowired
     private AIBaseService baseService;
 
     @Autowired
-    private ChatSessionService chatSessionService;
-    @Autowired
-    private FixedPromptResponseService fixedPromptResponseService;
-    @Autowired
-    private DataAccessAgent dataAccessAgent;
-    @Autowired
-    private InspectionAgent inspectionAgent;
-    @Autowired
-    private McpAgent mcpAgent;
-    @Autowired
-    private ChatMessagePartParser chatMessagePartParser;
-    @Autowired
-    private ChatAttachmentService chatAttachmentService;
+    private AIGeneralCompleteService completeService;
 
 
     /**
@@ -106,128 +98,49 @@ public class ChatController extends BaseController {
             HttpServletResponse response,
             @Valid @RequestBody ChatDto chatDto
     ) {
-        boolean eventStream = RESPONSE_FORMAT_EVENTS.equals(chatDto.getResponseFormat());
+        boolean eventStream = dihChatApplicationService.isEventStream(chatDto);
         response.setCharacterEncoding("UTF-8");
         if (eventStream) {
             response.setContentType("application/x-ndjson;charset=UTF-8");
         }
+        return dihChatApplicationService.chat(chatDto, getSessionUser());
+    }
 
-        // TODO 临时限制ask之外的不允许使用
-        if (chatDto.getType() != null && chatDto.getType().startsWith("agent")
-                && !DataAccessAgent.AGENT_TYPE.equals(chatDto.getType())
-                && !McpAgent.AGENT_TYPE.equals(chatDto.getType())
-                && !"agent_inspect".equals(chatDto.getType())) {
-            return errorResponse(eventStream, "对不起，当前智能体没有开通权限，请联系管理员！");
+    /**
+     * 获取建议
+     */
+    @PostMapping(value = "/suggest")
+    @Operation(summary = "补全建议", description = "补全建议")
+    public ResponseWrap<String> suggest(@RequestBody SuggestDto suggestDto) {
+        try {
+            if (suggestDto == null || !StringUtils.hasText(suggestDto.getCurrentLine()) || suggestDto.getCurrentLine().length() < 2) {
+                return ResponseWrap.success("AI暂无可用建议");
+            }
+            String currentLine = suggestDto.getCurrentLine().substring(0, suggestDto.getCurrentLine().length() - 2);
+            String context = StringUtils.hasText(suggestDto.getContent())
+                    ? suggestDto.getContent().replace(suggestDto.getCurrentLine(), currentLine)
+                    : currentLine;
+            String prompt = "上下文：%s\n当前行：%s\n".formatted(context, currentLine);
+            String suggest = completeService.complete(prompt);
+            return ResponseWrap.success(suggest);
+        } catch (Exception e) {
+            log.warn("生成补全建议失败: {}", e.getMessage(), e);
         }
+        return ResponseWrap.success("AI暂无可用建议");
+    }
 
-
+    @GetMapping("/model/list")
+    public ResponseWrap<List<Map<String, String>>> modelList() {
         List<Map<String, String>> models = baseService.getModels();
-        List<String> modelName = models.stream()
-                .map(map -> map.get("model"))
-                .filter(StringUtils::hasText)
-                .distinct()
-                .toList();
-
-        String model = chatDto.getModel();
-        String userMessage = resolveUserMessage(chatDto);
-        String chatId = chatDto.getChatId();
-        if (!StringUtils.hasText(userMessage)) {
-            return errorResponse(eventStream, "消息内容或附件不能为空。");
+        if (models.isEmpty()) {
+            return ResponseWrap.fail(ResultCodeEnum.NO_AUTHORITY);
         }
-        if (StringUtils.hasText(model)) {
-            if (!modelName.contains(model)) {
-                return errorResponse(eventStream, "Input model not support.");
-            } else if ("auto".equals(model)) {
-                // 使用配置中的默认模型
-                model = null;
-            } else if ("x-sage-v1".equals(model)) {
-                // TODO 以后再添加自己的模型
-                model = null;
-            }
-        } else {
-            model = null;
-        }
+        return ResponseWrap.success(models);
+    }
 
-        // 检查chatId，如果不是已有会话，创建新的会话记录
-        // 添加用户消息到文档中
-        User currentUser = getSessionUser();
-        String prompt = chatAttachmentService.appendAttachmentContext(userMessage, chatDto.getAttachments(), currentUser);
-        ChatSession chatSession = chatSessionService.getChatSessionBySessionId(chatId, currentUser);
-        if (chatSession == null) {
-            ChatSessionDto chatSessionDto = new ChatSessionDto();
-            chatSessionDto.setSessionId(chatId);
-            chatSessionDto.setTitle(userMessage);
-            chatSessionDto.setType(chatDto.getType());
-            chatSessionDto.setDeepThink(chatDto.getDeepThink());
-            chatSessionDto.setOnlineSearch(chatDto.getOnlineSearch());
-            List<Message> messages = new ArrayList<>();
-            messages.add(createUserMessage(userMessage, chatDto.getAttachments()));
-            chatSessionDto.setMessages(JacksonUtil.toJson(messages));
-            chatSession = chatSessionService.create(chatSessionDto, currentUser);
-        } else {
-            // 如果是已有会话，将当前内容添加到会话中
-            try {
-                List<Message> messages = JacksonUtil.toList(chatSession.getMessages(), new TypeReference<List<Message>>() {
-                });
-                messages.add(createUserMessage(userMessage, chatDto.getAttachments()));
-                chatSession.setMessages(JacksonUtil.toJson(messages));
-                ChatSessionDto chatSessionDto = new ChatSessionDto();
-                chatSessionDto.setMessages(chatSession.getMessages());
-                chatSessionService.update((long) chatSession.getId(), chatSessionDto, currentUser);
-            } catch (Exception e) {
-                log.error("更新会话失败: {}", e.getMessage(), e);
-            }
-        }
-
-        // 用于收集模型返回消息的引用和类型
-        AtomicReference<String> modelResponse = new AtomicReference<>("");
-        AtomicReference<MessageType> messageType = new AtomicReference<>(MessageType.TEXT);
-
-        Flux<String> fluxResponse;
-        Optional<String> fixedResponse = fixedPromptResponseService.findResponse(userMessage);
-        if (DataAccessAgent.AGENT_TYPE.equals(chatDto.getType())) {
-            messageType.set(MessageType.TEXT);
-            fluxResponse = dataAccessAgent.chat(chatId, model, prompt, chatDto.getAttachments(), currentUser);
-        } else if (McpAgent.AGENT_TYPE.equals(chatDto.getType())) {
-            messageType.set(MessageType.TEXT);
-            fluxResponse = mcpAgent.chat(chatId, model, prompt, chatDto.getAttachments(), currentUser);
-        } else if (fixedResponse.isPresent()) {
-            log.info("固定提示词命中，直接返回测试文件中的预期回答。chatId={}", chatId);
-            messageType.set(MessageType.TEXT);
-            fluxResponse = Flux.just(fixedResponse.get());
-        } else if ("agent_inspect".equals(chatDto.getType())) {
-            ChatResponse chatResponse = inspectionAgent.chat(prompt, model, chatId);
-            messageType.set(chatResponse.getType());
-            fluxResponse = Flux.just(chatResponse.getContent());
-        } else if (BooleanUtils.isTrue(chatDto.getDeepThink())) {
-            // 普通深度思考对话，类型为 TEXT
-            messageType.set(MessageType.TEXT);
-            fluxResponse = chatService.deepThinkingChat(chatId, model, prompt, chatDto.getAttachments(), currentUser);
-        } else {
-            // 普通聊天对话，类型为 TEXT
-            messageType.set(MessageType.TEXT);
-            fluxResponse = chatService.chat(chatId, model, prompt, chatDto.getAttachments(), currentUser);
-        }
-
-        // 在返回前捕获模型响应并保存到会话中
-        // 将chatSession声明为final以便在lambda中使用
-        final ChatSession finalChatSession = chatSession;
-        if (eventStream) {
-            return fluxResponse
-                    .doOnNext(s -> modelResponse.getAndAccumulate(s, String::concat))
-                    .map(s -> toNdjson(ChatStreamEvent.delta(s)))
-                    .concatWith(Flux.defer(() -> {
-                        Message aiMessage = saveAiResponse(finalChatSession, currentUser, modelResponse.get(), messageType.get(), true, BooleanUtils.isTrue(chatDto.getDeepThink()));
-                        return Flux.just(toNdjson(ChatStreamEvent.done(aiMessage)));
-                    }))
-                    .onErrorResume(e -> {
-                        log.error("聊天事件流返回失败: {}", e.getMessage(), e);
-                        return Flux.just(toNdjson(ChatStreamEvent.error("抱歉，回复失败，请稍后重试~")));
-                    });
-        }
-
-        return fluxResponse.doOnNext(s -> modelResponse.getAndAccumulate(s, String::concat))
-                .doOnComplete(() -> saveAiResponse(finalChatSession, currentUser, modelResponse.get(), messageType.get(), false, false));
+    @GetMapping("/health")
+    public ResponseWrap<String> health() {
+        return ResponseWrap.success("is running......");
     }
 
     @PostMapping("/upload")
@@ -275,8 +188,8 @@ public class ChatController extends BaseController {
     @Operation(summary = "记录聊天动作确认结果")
     public ResponseWrap<?> actionDecision(@Valid @RequestBody ChatActionDecisionDto decisionDto) {
         String decision = decisionDto.getDecision();
-        if (!DECISION_APPROVED.equals(decision) && !DECISION_REJECTED.equals(decision)) {
-            return ResponseWrap.fail(400, "决策值只支持 approved 或 rejected");
+        if (!isSupportedDecision(decision)) {
+            return ResponseWrap.fail(400, "决策值只支持 approved、rejected、dispose、ignore、continue、apply_config、abandon、revise 或 submitted");
         }
 
         try {
@@ -288,22 +201,7 @@ public class ChatController extends BaseController {
 
             List<Message> messages = JacksonUtil.toList(chatSession.getMessages(), new TypeReference<List<Message>>() {
             });
-            boolean updated = false;
-            for (Message message : messages) {
-                if (!Objects.equals(message.getId(), decisionDto.getMessageId()) || message.getParts() == null) {
-                    continue;
-                }
-                for (ChatMessagePart part : message.getParts()) {
-                    if (Objects.equals(part.getId(), decisionDto.getPartId()) && "confirm".equals(part.getType())) {
-                        part.setStatus(decision);
-                        updated = true;
-                        break;
-                    }
-                }
-                if (updated) {
-                    break;
-                }
-            }
+            boolean updated = updateDecisionPart(messages, decisionDto);
 
             if (!updated) {
                 return ResponseWrap.fail(404, "确认项不存在");
@@ -320,68 +218,103 @@ public class ChatController extends BaseController {
         }
     }
 
-    private Flux<String> errorResponse(boolean eventStream, String message) {
-        if (eventStream) {
-            return Flux.just(toNdjson(ChatStreamEvent.error(message)));
-        }
-        return Flux.just(message);
+    private boolean isPlaceholderBuiltinAgent(String chatType) {
+        return false;
     }
 
-    private String resolveUserMessage(ChatDto chatDto) {
-        if (chatDto == null) {
-            return "";
-        }
-        if (StringUtils.hasText(chatDto.getMessage())) {
-            return chatDto.getMessage().trim();
-        }
-        if (chatDto.getAttachments() != null && !chatDto.getAttachments().isEmpty()) {
-            return "请分析上传的附件内容。";
-        }
-        return "";
+    private boolean isSupportedDecision(String decision) {
+        return DECISION_APPROVED.equals(decision)
+                || DECISION_REJECTED.equals(decision)
+                || DECISION_DISPOSE.equals(decision)
+                || DECISION_IGNORE.equals(decision)
+                || DECISION_CONTINUE.equals(decision)
+                || DECISION_APPLY_CONFIG.equals(decision)
+                || DECISION_ABANDON.equals(decision)
+                || DECISION_REVISE.equals(decision)
+                || DECISION_SUBMITTED.equals(decision);
     }
 
-    private Message createUserMessage(String content, List<ChatAttachment> attachments) {
-        Message message = new Message("user", content);
-        if (attachments != null && !attachments.isEmpty()) {
-            message.setAttachments(attachments);
-        }
-        return message;
+    private boolean isDecisionPart(ChatMessagePart part) {
+        return "confirm".equals(part.getType())
+                || "info-steps".equals(part.getType())
+                || "analysis-decision".equals(part.getType())
+                || "data-access-decision".equals(part.getType());
     }
 
-    private Message saveAiResponse(ChatSession chatSession, User currentUser, String content, MessageType type, boolean withParts, boolean deepThinkRequested) {
-        Message aiMessage = new Message("ai", content, type);
-        if (withParts) {
-            List<ChatMessagePart> parts = new ArrayList<>(chatMessagePartParser.parse(content, type));
-            if (deepThinkRequested && parts.stream().noneMatch(part -> "thinking".equals(part.getType()))) {
-                parts.add(0, ChatMessagePart.builder()
-                        .id(java.util.UUID.randomUUID().toString())
-                        .type("thinking")
-                        .title("思考过程")
-                        .content("已完成深度思考，当前模型未返回可展示的思考过程。")
-                        .status("completed")
-                        .build());
+    private boolean updateDecisionPart(List<Message> messages, ChatActionDecisionDto decisionDto) {
+        if (messages == null || messages.isEmpty()) {
+            return false;
+        }
+        String expectedType = expectedDecisionPartType(decisionDto.getDecision());
+        ChatMessagePart matchedPart = findDecisionPart(messages, decisionDto, expectedType, true, true);
+        if (matchedPart == null) {
+            matchedPart = findDecisionPart(messages, decisionDto, expectedType, false, true);
+        }
+        if (matchedPart == null) {
+            matchedPart = findDecisionPart(messages, decisionDto, expectedType, false, false);
+        }
+        if (matchedPart == null) {
+            log.warn("确认项不存在: chatId={}, messageId={}, partId={}, decision={}",
+                    decisionDto.getChatId(),
+                    decisionDto.getMessageId(),
+                    decisionDto.getPartId(),
+                    decisionDto.getDecision());
+            return false;
+        }
+        matchedPart.setStatus(decisionDto.getDecision());
+        return true;
+    }
+
+    private ChatMessagePart findDecisionPart(List<Message> messages,
+                                             ChatActionDecisionDto decisionDto,
+                                             String expectedType,
+                                             boolean requireMessageId,
+                                             boolean requirePartId) {
+        for (int messageIndex = messages.size() - 1; messageIndex >= 0; messageIndex--) {
+            Message message = messages.get(messageIndex);
+            if (requireMessageId && !Objects.equals(message.getId(), decisionDto.getMessageId())) {
+                continue;
             }
-            aiMessage.setParts(parts);
+            if (message.getParts() == null || message.getParts().isEmpty()) {
+                continue;
+            }
+            for (int partIndex = message.getParts().size() - 1; partIndex >= 0; partIndex--) {
+                ChatMessagePart part = message.getParts().get(partIndex);
+                if (!isDecisionPart(part)) {
+                    continue;
+                }
+                if (expectedType != null && !expectedType.equals(part.getType())) {
+                    continue;
+                }
+                if (requirePartId && !Objects.equals(part.getId(), decisionDto.getPartId())) {
+                    continue;
+                }
+                if (!requirePartId && part.getStatus() != null && !"pending".equals(part.getStatus())) {
+                    continue;
+                }
+                return part;
+            }
         }
-        if (chatSession == null) {
-            return aiMessage;
-        }
-        try {
-            List<Message> messages = JacksonUtil.toList(chatSession.getMessages(), new TypeReference<List<Message>>() {
-            });
-            messages.add(aiMessage);
-            chatSession.setMessages(JacksonUtil.toJson(messages));
-            ChatSessionDto chatSessionDto = new ChatSessionDto();
-            chatSessionDto.setMessages(chatSession.getMessages());
-            chatSessionService.update((long) chatSession.getId(), chatSessionDto, currentUser);
-            log.info("保存AI响应到会话，消息类型: {}, 富消息片段: {}", aiMessage.getType(), withParts);
-        } catch (Exception e) {
-            log.error("保存模型响应到会话失败: {}", e.getMessage(), e);
-        }
-        return aiMessage;
+        return null;
     }
 
-    private String toNdjson(ChatStreamEvent event) {
-        return JacksonUtil.toJson(event) + "\n";
+    private String expectedDecisionPartType(String decision) {
+        if (DECISION_DISPOSE.equals(decision)
+                || DECISION_IGNORE.equals(decision)
+                || DECISION_CONTINUE.equals(decision)) {
+            return "analysis-decision";
+        }
+        if (DECISION_APPLY_CONFIG.equals(decision)
+                || DECISION_ABANDON.equals(decision)
+                || DECISION_REVISE.equals(decision)) {
+            return "data-access-decision";
+        }
+        if (DECISION_APPROVED.equals(decision) || DECISION_REJECTED.equals(decision)) {
+            return "confirm";
+        }
+        if (DECISION_SUBMITTED.equals(decision)) {
+            return "info-steps";
+        }
+        return null;
     }
 }
