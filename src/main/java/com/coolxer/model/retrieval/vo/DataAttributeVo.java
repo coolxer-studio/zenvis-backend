@@ -13,11 +13,15 @@ public class DataAttributeVo {
 
     private String retrievalType;
 
+    private String displayType;
+
     private String description;
 
-    private boolean aggregateLink;
+    private String linkTemplate;
 
     private boolean autoComplete;
+
+    private boolean copyable;
 
     private List<OperatorVo> operatorList;
 

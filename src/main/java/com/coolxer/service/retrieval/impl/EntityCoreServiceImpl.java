@@ -5,6 +5,7 @@ import com.coolxer.commons.exception.ApiException;
 import com.coolxer.model.base.vo.PageRowsVo;
 import com.coolxer.model.retrieval.meta.DataAttribute;
 import com.coolxer.model.retrieval.meta.DataEntity;
+import com.coolxer.model.retrieval.meta.MetaDataConstants;
 import com.coolxer.model.retrieval.rule.RetrievalPageable;
 import com.coolxer.service.retrieval.EntityCoreService;
 import com.coolxer.service.retrieval.MetaDataService;
@@ -23,6 +24,8 @@ import java.util.stream.Collectors;
 @Service
 @Slf4j
 public class EntityCoreServiceImpl implements EntityCoreService {
+
+    private static final List<String> IP_FIELD_NAMES = List.of("src_ip", "dst_ip", "dest_ip");
 
     @Autowired
     private MetaDataService metaDataService;
@@ -51,7 +54,8 @@ public class EntityCoreServiceImpl implements EntityCoreService {
     public boolean delete(String entityName, String id) {
         DataEntity dataEntity = metaDataService.getDataEntityByName(entityName);
         if (dataEntity != null) {
-            queryEngine.delete(dataEntity.getTableName(), "id", id);
+            queryEngine.delete(dataEntity.getTableName(), MetaDataConstants.RECORD_ID_COLUMN,
+                    requireRecordId(id));
             return true;
         }
         return false;
@@ -61,7 +65,8 @@ public class EntityCoreServiceImpl implements EntityCoreService {
     public boolean deleteALL(String entityName, List<String> ids) {
         DataEntity dataEntity = metaDataService.getDataEntityByName(entityName);
         if (dataEntity != null) {
-            queryEngine.deleteIn(dataEntity.getTableName(), "id", ids);
+            queryEngine.deleteIn(dataEntity.getTableName(), MetaDataConstants.RECORD_ID_COLUMN,
+                    requireRecordIds(ids));
             return true;
         }
         return false;
@@ -71,6 +76,7 @@ public class EntityCoreServiceImpl implements EntityCoreService {
     public boolean update(String entityName, String id, Map<String, Object> mapDto) {
         DataEntity dataEntity = metaDataService.getDataEntityByName(entityName);
         if (dataEntity != null) {
+            String recordId = requireRecordId(id);
             Map<String, String> columnValueMap = getColumnValueMap(entityName, mapDto);
             // 剔除orderBy的主键字段
             if (dataEntity.getAutoCreate() != null) {
@@ -78,8 +84,9 @@ public class EntityCoreServiceImpl implements EntityCoreService {
                     columnValueMap.remove(orderBy);
                 });
             }
-            // 剔除id
-            columnValueMap.remove("id");
+            // 平台内置字段不可更新；写入校验之外再做一次防御性过滤。
+            columnValueMap.remove(MetaDataConstants.RECORD_ID_COLUMN);
+            columnValueMap.remove(MetaDataConstants.INSERT_TIME_COLUMN);
             // json类型的字段暂不支持更新
             metaDataService.getAllDataAttributeByEntity(dataEntity).stream().forEach(
                     dataAttribute -> {
@@ -88,10 +95,23 @@ public class EntityCoreServiceImpl implements EntityCoreService {
                         }
                     }
             );
-            queryEngine.update(dataEntity.getTableName(), columnValueMap, "id", id);
+            queryEngine.update(dataEntity.getTableName(), columnValueMap,
+                    MetaDataConstants.RECORD_ID_COLUMN, recordId);
             return true;
         }
         return false;
+    }
+
+    @Override
+    public boolean updateALL(String entityName, List<String> ids, Map<String, Object> mapDto) {
+        List<String> recordIds = requireRecordIds(ids);
+        if (metaDataService.getDataEntityByName(entityName) == null) {
+            return false;
+        }
+        for (String recordId : recordIds) {
+            update(entityName, recordId, mapDto);
+        }
+        return true;
     }
 
     @Override
@@ -99,7 +119,9 @@ public class EntityCoreServiceImpl implements EntityCoreService {
         DataEntity dataEntity = metaDataService.getDataEntityByName(entityName);
         if (dataEntity != null) {
             List<DataAttribute> dataAttributes = metaDataService.getAllDataAttributeByEntity(dataEntity);
-            Map<String, Object> result = queryEngine.findById(dataEntity.getTableName(), id, dataAttributes);
+            Map<String, Object> result = queryEngine.findById(
+                    dataEntity.getTableName(), MetaDataConstants.RECORD_ID_COLUMN,
+                    requireRecordId(id), dataAttributes);
             return result;
         }
         return null;
@@ -237,7 +259,8 @@ public class EntityCoreServiceImpl implements EntityCoreService {
             if (dataEntity != null) {
                 assetNames.add(dataEntity.getName());
                 assetLabels.add(dataEntity.getLabel());
-                Map<String, Object> result = queryEngine.countByDateOfWeek(dataEntity.getTableName(), "insert_time");
+                Map<String, Object> result = queryEngine.countByDateOfWeek(
+                        dataEntity.getTableName(), MetaDataConstants.INSERT_TIME_COLUMN);
                 trendDataList.add(result);
             }
         }
@@ -306,6 +329,68 @@ public class EntityCoreServiceImpl implements EntityCoreService {
         return statisticsData;
     }
 
+    @Override
+    public Map<String, Object> ipStatistics(List<String> entities, String ip) {
+        String normalizedIp = ip == null ? null : ip.trim();
+        if (normalizedIp == null || normalizedIp.isEmpty()) {
+            throw new ApiException(ResultCodeEnum.FIELD_IS_EMPTY.getCode(), "IP不能为空");
+        }
+        LinkedHashSet<String> uniqueEntities = entities == null ? new LinkedHashSet<>() : entities.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(entity -> !entity.isEmpty())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (uniqueEntities.isEmpty()) {
+            throw new ApiException(ResultCodeEnum.FIELD_IS_EMPTY.getCode(), "实体列表不能为空");
+        }
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        List<String> xaxisData = new ArrayList<>();
+        List<Long> seriesData = new ArrayList<>();
+        long total = 0L;
+        int matchedEntityCount = 0;
+        for (String entityName : uniqueEntities) {
+            DataEntity dataEntity = metaDataService.getDataEntityByName(entityName);
+            if (dataEntity == null) {
+                continue;
+            }
+            Map<String, DataAttribute> attributesByName = metaDataService.getAllDataAttributeByEntity(dataEntity)
+                    .stream()
+                    .collect(Collectors.toMap(DataAttribute::getName, Function.identity(), (first, second) -> first));
+            List<String> logicalFields = IP_FIELD_NAMES.stream()
+                    .filter(attributesByName::containsKey)
+                    .toList();
+            List<String> columns = logicalFields.stream()
+                    .map(field -> attributesByName.get(field).getColumnName())
+                    .toList();
+            long entityTotal = columns.isEmpty()
+                    ? 0L : queryEngine.countAnyOf(dataEntity.getTableName(), columns, normalizedIp).longValue();
+            if (entityTotal > 0) {
+                matchedEntityCount++;
+            }
+            total += entityTotal;
+
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("entity", dataEntity.getName());
+            row.put("label", dataEntity.getLabel());
+            row.put("fields", logicalFields);
+            row.put("total", entityTotal);
+            rows.add(row);
+            xaxisData.add(dataEntity.getLabel());
+            seriesData.add(entityTotal);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("ip", normalizedIp);
+        result.put("total", total);
+        result.put("entity_count", rows.size());
+        result.put("matched_entity_count", matchedEntityCount);
+        result.put("rows", rows);
+        result.put("xaxis_data", xaxisData);
+        result.put("series_data", seriesData);
+        return result;
+    }
+
     private Map<String, String> getColumnValueMap(String entityName, Map<String, Object> mapDto) {
         Map<String, String> columnValueMap = new HashMap<>();
         mapDto.entrySet().stream().forEach(entry -> {
@@ -314,6 +399,10 @@ public class EntityCoreServiceImpl implements EntityCoreService {
             DataAttribute dataAttribute = metaDataService.getDataAttributeByName(entityName, columnName);
             if (dataAttribute == null) {
                 throw new ApiException(ResultCodeEnum.NO_SUPPORTED.getCode(), "字段不存在: " + columnName);
+            }
+            if (MetaDataConstants.isSystemMaintained(dataAttribute)) {
+                throw new ApiException(ResultCodeEnum.NO_SUPPORTED.getCode(),
+                        dataAttribute.getName() + "由系统自动维护，不允许手工写入");
             }
             if (dataAttribute.isMustCandidate() && !dataAttribute.getMapping().containsValue(entry.getValue())) {
                 throw new ApiException(ResultCodeEnum.FIELD_NOT_CANDIDATE.getCode(), ResultCodeEnum.FIELD_NOT_CANDIDATE.getDescription());
@@ -336,6 +425,29 @@ public class EntityCoreServiceImpl implements EntityCoreService {
             }
         });
         return columnValueMap;
+    }
+
+    private List<String> requireRecordIds(List<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new ApiException(ResultCodeEnum.FIELD_IS_EMPTY.getCode(), "记录ID不能为空");
+        }
+        return ids.stream().map(this::requireRecordId).toList();
+    }
+
+    private String requireRecordId(String id) {
+        if (id == null || id.isBlank()) {
+            throw new ApiException(ResultCodeEnum.FIELD_IS_EMPTY.getCode(), "记录ID不能为空");
+        }
+        String normalized = id.trim();
+        try {
+            UUID uuid = UUID.fromString(normalized);
+            if (!uuid.toString().equalsIgnoreCase(normalized)) {
+                throw new IllegalArgumentException("非标准UUID格式");
+            }
+        } catch (IllegalArgumentException exception) {
+            throw new ApiException(ResultCodeEnum.NO_SUPPORTED.getCode(), "记录ID必须为标准UUID格式");
+        }
+        return normalized;
     }
 
     private String escapeSqlValue(String value) {

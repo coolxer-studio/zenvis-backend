@@ -94,8 +94,8 @@ ZenVis = **配置化数据存储 + 可视化引擎 + 检索分析 + 插件扩展
 
 | 场景       | 描述                 |
 | :------- | :----------------- |
-| 安全数据分析   | 资产风险评估、安全事件分析、漏洞管理 |
-| 运营数据分析   | 用户行为分析、性能监控、事件追踪   |
+| 事件数据分析   | 事件检索、关联分析、异常识别       |
+| 指标趋势分析   | 时序指标、性能监控、趋势追踪       |
 | IoT 数据处理 | 设备数据采集、实时监控、趋势分析   |
 | 日志分析     | 日志聚合、异常检测、合规审计     |
 | API 数据分析 | 接口调用统计、性能分析、错误追踪   |
@@ -130,7 +130,7 @@ ZenVis = **配置化数据存储 + 可视化引擎 + 检索分析 + 插件扩展
 | 数据库        | 用途                      |
 | :--------- | :---------------------- |
 | MySQL      | 存储业务数据（用户、角色、菜单、配置等）    |
-| ClickHouse | 存储时序数据（资产数据、风险事件、运营事件等） |
+| ClickHouse | 存储插件定义的时序数据、事件数据和分析指标 |
 | Redis      | 缓存和向量存储（会话管理、AI 向量检索）   |
 
 ***
@@ -245,13 +245,17 @@ PUSH_IMAGE=true ./build.sh
 | `spring.data.redis.port`                 | `6379`      | Redis 端口              |
 | `spring.ai.openai.base-url`              | -           | OpenAI 兼容模型服务地址；未配置不影响启动，调用 AI 功能时报错 |
 | `spring.ai.openai.api-key`               | -           | OpenAI API Key           |
+| `app.security.api.bearer-token`          | -           | 普通 REST API Bearer Token；配置后 `/api/v1/**` 支持 `Authorization: Bearer <token>` |
+| `app.security.api.bearer-user`           | `admin@admin.com` | Bearer Token 调用映射到的系统用户邮箱，用于权限上下文和审计 |
 | `app.security.mcp.bearer-token`          | -           | MCP Server Bearer Token，未配置时 MCP 接口返回 401 |
 | `spring.servlet.multipart.max-file-size` | `300MB`     | 最大上传文件大小              |
 | `server.servlet.session.timeout`         | `3600S`     | 会话超时时间                |
 
+第三方系统调用普通 REST API 时，既可以按前端方式先登录拿 `JSESSIONID`，也可以配置 `API_BEARER_TOKEN` 后直接携带请求头：`Authorization: Bearer <app.security.api.bearer-token>`。Bearer Token 调用会以 `app.security.api.bearer-user` 对应用户身份执行。
+
 MCP 客户端访问 Spring AI MCP Server 接口时需要携带请求头：`Authorization: Bearer <app.security.mcp.bearer-token>`。
 
-本地开发不要把数据库、Redis、LLM 或 MCP 密钥写入已提交的 profile 配置。可以使用环境变量，也可以在 `zenvis-backend/config/local-secrets.properties` 中放本机密钥；该文件已加入 `.gitignore`，应用启动时会自动读取。例如：
+本地开发不要把数据库、Redis、LLM、REST API 或 MCP 密钥写入已提交的 profile 配置。可以使用环境变量，也可以在 `zenvis-backend/config/local-secrets.properties` 中放本机密钥；该文件已加入 `.gitignore`，应用启动时会自动读取。例如：
 
 ```properties
 MYSQL_PASSWORD=your_mysql_password
@@ -260,6 +264,8 @@ REDIS_PASSWORD=your_redis_password
 OPENAI_BASE_URL=https://your-llm-endpoint
 OPENAI_API_KEY=your_api_key
 OPENAI_CHAT_MODEL=your_chat_model
+API_BEARER_TOKEN=your_api_token
+API_BEARER_USER=admin@admin.com
 MCP_BEARER_TOKEN=your_mcp_token
 ```
 
@@ -297,10 +303,6 @@ zenvis-backend/
 │   ├── component/                    # Spring 组件
 │   ├── configuration/                # 配置类
 │   ├── controller/                   # REST API 控制器
-│   │   ├── business/                 # 业务模块
-│   │   │   ├── asset/                # 资产管理
-│   │   │   ├── operation/            # 运营事件
-│   │   │   └── risk/                 # 风险管理
 │   │   ├── dashboard/                # 仪表盘
 │   │   ├── dih/                      # 深度思考助手
 │   │   ├── policy/                   # 策略配置
@@ -345,47 +347,6 @@ zenvis-backend/
 | 推送任务  | `PushTaskController`  | 定时推送任务管理    |
 | 仪表盘配置 | `DashboardController` | 仪表盘配置管理     |
 
-### 资产管理
-
-| 功能     | 控制器                      | 说明         |
-| :----- | :----------------------- | :--------- |
-| API 资产 | `AssetApiController`     | API 接口资产数据 |
-| 应用资产   | `AssetAppController`     | 应用程序资产数据   |
-| 文件资产   | `AssetFileController`    | 文件资产数据     |
-| 主机资产   | `AssetHostController`    | 主机设备资产数据   |
-| IoT 资产 | `AssetIotController`     | IoT 设备资产数据 |
-| 日志资产   | `AssetLogController`     | 日志资产数据     |
-| 移动资产   | `AssetMobileController`  | 移动设备资产数据   |
-| PC 资产  | `AssetPcController`      | PC 设备资产数据  |
-| 探针资产   | `AssetProbeController`   | 探针资产数据     |
-| 服务资产   | `AssetServiceController` | 服务资产数据     |
-| 资产规则   | `AssetRuleController`    | 资产规则配置     |
-
-### 风险管理
-
-| 功能   | 控制器                           | 说明     |
-| :--- | :---------------------------- | :----- |
-| 攻击风险 | `AttackRiskController`        | 攻击风险分析 |
-| 基线风险 | `BaselineRiskController`      | 基线风险评估 |
-| 数据风险 | `DataRiskController`          | 数据安全风险 |
-| 漏洞风险 | `VulnerabilityRiskController` | 漏洞风险管理 |
-| 弱风险  | `WeakRiskController`          | 弱口令风险  |
-| 风险事件 | `RiskEventController`         | 风险事件管理 |
-
-### 运营事件
-
-| 功能       | 控制器                          | 说明       |
-| :------- | :--------------------------- | :------- |
-| ANR 事件   | `AnrEventController`         | 应用无响应事件  |
-| API 调用事件 | `ApiCallEventController`     | API 调用统计 |
-| 点击事件     | `ClickEventController`       | 用户点击事件   |
-| 崩溃事件     | `CrashEventController`       | 应用崩溃事件   |
-| 页面事件     | `PageEventController`        | 页面访问事件   |
-| 性能事件     | `PerformanceEventController` | 性能监控事件   |
-| 启动事件     | `StartEventController`       | 应用启动事件   |
-| 网络事件     | `NetworkEventController`     | 网络请求事件   |
-| 位置事件     | `LocationEventController`    | 位置信息事件   |
-
 ### 深度思考助手 (DIH)
 
 | 功能        | 控制器                          | 说明               |
@@ -399,7 +360,6 @@ zenvis-backend/
 
 | 功能   | 控制器                     | 说明     |
 | :--- | :---------------------- | :----- |
-| 聚合查询 | `AggregateController`   | 数据聚合统计 |
 | 实体核心 | `EntityCoreController`  | 实体数据查询 |
 | 实体计数 | `EntityCountController` | 实体数量统计 |
 | 检索服务 | `RetrievalController`   | 通用检索接口 |
@@ -417,9 +377,7 @@ zenvis-backend/
 | 模块   | 基础路径                | 说明        |
 | :--- | :------------------ | :-------- |
 | 系统管理 | `/api/v1/system`    | 用户、角色、菜单等 |
-| 资产管理 | `/api/v1/asset`     | 各类资产数据    |
-| 风险管理 | `/api/v1/risk`      | 风险相关接口    |
-| 运营事件 | `/api/v1/operation` | 运营事件数据    |
+| 插件接口 | `/api/v1/plugin/{package_name}` | 已安装插件的动态业务接口 |
 | DIH  | `/api/v1/dih`       | AI 相关接口   |
 | 检索引擎 | `/api/v1/retrieval` | 数据检索接口    |
 

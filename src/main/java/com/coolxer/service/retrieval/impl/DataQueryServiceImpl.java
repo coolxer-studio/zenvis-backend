@@ -2,6 +2,8 @@ package com.coolxer.service.retrieval.impl;
 
 import com.coolxer.commons.enums.ResultCodeEnum;
 import com.coolxer.commons.exception.ApiException;
+import com.coolxer.model.retrieval.meta.DataAttribute;
+import com.coolxer.model.retrieval.meta.MetaDataConstants;
 import com.coolxer.model.retrieval.query.ColumnCriteria;
 import com.coolxer.model.retrieval.query.ColumnCriteriaExpression;
 import com.coolxer.model.retrieval.query.DataQuery;
@@ -15,6 +17,7 @@ import com.coolxer.service.retrieval.DataQueryService;
 import com.coolxer.service.retrieval.QueryEngine;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -31,12 +34,22 @@ public class DataQueryServiceImpl implements DataQueryService {
 
     @Override
     public DataQueryContext query(RetrievalRule retrievalRule) {
+        long startedAt = System.nanoTime();
         DataQueryContext context = generateQueryContext(retrievalRule);
         executeQuery(context);
+        String entity = retrievalRule.getDisplayAttributes().get(0).getEntity().getName();
+        int conditionCount = CollectionUtils.size(retrievalRule.getRetrievalCriteria());
+        int fieldCount = CollectionUtils.size(retrievalRule.getDisplayAttributes().get(0).getAttributeList());
+        log.info("retrieval query completed, context_id={}, entity={}, conditions={}, fields={}, duration_ms={}",
+                context.getContextId(), entity, conditionCount, fieldCount,
+                (System.nanoTime() - startedAt) / 1_000_000);
         return context;
     }
 
     private DataQueryContext generateQueryContext(RetrievalRule retrievalRule) {
+        if (retrievalRule == null) {
+            throw new ApiException(ResultCodeEnum.FIELD_IS_EMPTY.getCode(), "检索规则不能为空");
+        }
         DataQueryContext dataQueryContext = new DataQueryContext();
         dataQueryContext.setContextId(UUID.randomUUID().toString());
         List<DataQuery> dataQueryList;
@@ -45,6 +58,9 @@ public class DataQueryServiceImpl implements DataQueryService {
 
         } else {
             dataQueryList = generateDataQueryList(retrievalRule);
+        }
+        if (CollectionUtils.isEmpty(dataQueryList)) {
+            throw new ApiException(ResultCodeEnum.FIELD_IS_EMPTY.getCode(), "检索规则缺少可执行查询");
         }
         dataQueryContext.setQueryChain(dataQueryList);
         RetrievalPageable pageable = retrievalRule.getRetrievalPageable();
@@ -55,17 +71,23 @@ public class DataQueryServiceImpl implements DataQueryService {
     }
 
     private List<DataQuery> generateDataQueryList(RetrievalRule retrievalRule) {
+        if (CollectionUtils.isEmpty(retrievalRule.getDisplayAttributes())) {
+            throw new ApiException(ResultCodeEnum.FIELD_IS_EMPTY.getCode(), "展示字段不能为空");
+        }
         Map<String, List<DisplayColumn>> displayColumnNameMap = new HashMap<>();
         retrievalRule.getDisplayAttributes().forEach(table -> {
-            List<DisplayColumn> displayColumnList = table.getAttributeList().stream()
-                    .map(attribute -> new DisplayColumn().fromDisplayColumn(attribute))
-                    .toList();
+            if (table == null || table.getEntity() == null || CollectionUtils.isEmpty(table.getAttributeList())) {
+                throw new ApiException(ResultCodeEnum.FIELD_IS_EMPTY.getCode(), "展示字段不能为空");
+            }
+            List<DisplayColumn> displayColumnList = buildDisplayColumns(table.getAttributeList());
             displayColumnNameMap.put(table.getEntity().getTableName(), displayColumnList);
         });
         if (Objects.nonNull(retrievalRule.getCriteriaExpression())) {
             return generateExpressionDataQueryList(retrievalRule, displayColumnNameMap);
         }
-        List<DataQuery> dataQueryList = retrievalRule.getRetrievalCriteria().stream()
+        List<RetrievalCriteria> criteriaList = retrievalRule.getRetrievalCriteria() == null
+                ? Collections.emptyList() : retrievalRule.getRetrievalCriteria();
+        List<DataQuery> dataQueryList = criteriaList.stream()
                 .map(this::toColumnCriteria)
                 .collect(Collectors.groupingBy(ColumnCriteria::getTableName))
                 .entrySet().stream()
@@ -89,6 +111,26 @@ public class DataQueryServiceImpl implements DataQueryService {
             });
         }
         return dataQueryList;
+    }
+
+    private List<DisplayColumn> buildDisplayColumns(List<DataAttribute> attributes) {
+        List<DisplayColumn> columns = attributes.stream()
+                .map(attribute -> new DisplayColumn().fromDisplayColumn(attribute))
+                .collect(Collectors.toCollection(ArrayList::new));
+        boolean recordIdSelected = attributes.stream()
+                .anyMatch(attribute -> MetaDataConstants.RECORD_ID_ATTRIBUTE.equals(attribute.getName()));
+        boolean recordIdRequiredByLink = attributes.stream()
+                .map(DataAttribute::getLinkTemplate)
+                .filter(StringUtils::isNotBlank)
+                .anyMatch(template -> template.contains("{" + MetaDataConstants.RECORD_ID_ATTRIBUTE + "}"));
+        if (recordIdRequiredByLink && !recordIdSelected) {
+            DisplayColumn recordIdColumn = new DisplayColumn();
+            recordIdColumn.setColumnName(MetaDataConstants.RECORD_ID_COLUMN);
+            recordIdColumn.setColumnType(MetaDataConstants.RECORD_ID_COLUMN_TYPE);
+            recordIdColumn.setDisplayName(MetaDataConstants.RECORD_ID_ATTRIBUTE);
+            columns.add(recordIdColumn);
+        }
+        return columns;
     }
 
     private List<DataQuery> generateExpressionDataQueryList(RetrievalRule retrievalRule, Map<String, List<DisplayColumn>> displayColumnNameMap) {
@@ -185,7 +227,9 @@ public class DataQueryServiceImpl implements DataQueryService {
     }
 
     private void singleQuery(DataQueryContext context) {
-
+        if (context == null || CollectionUtils.isEmpty(context.getQueryChain())) {
+            throw new ApiException(ResultCodeEnum.FIELD_IS_EMPTY.getCode(), "检索规则缺少可执行查询");
+        }
         DataQuery dataQuery = context.getQueryChain().get(0);
         RetrievalPageable pageable = context.getPageable();
         Map<String, Object> resultMap = queryEngine.queryWithRetrieval(dataQuery, pageable);

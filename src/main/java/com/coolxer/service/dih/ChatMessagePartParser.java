@@ -99,6 +99,7 @@ public class ChatMessagePartParser {
                 && !"zenvis:confirm".equals(info)
                 && !"zenvis:info-steps".equals(info)
                 && !"zenvis:analysis-decision".equals(info)
+                && !"zenvis:analysis-record".equals(info)
                 && !"zenvis:data-access-decision".equals(info)
                 && !"zenvis:meta-config-record".equals(info)
                 && !"zenvis:vectum-task-record".equals(info)
@@ -106,7 +107,9 @@ public class ChatMessagePartParser {
                 && !"zenvis:visualization-chart-record".equals(info)
                 && !"zenvis:visualization-config-record".equals(info)
                 && !"zenvis:dashboard-config-record".equals(info)
-                && !"zenvis:menu-config-record".equals(info)) {
+                && !"zenvis:menu-config-record".equals(info)
+                && !"zenvis:policy-record".equals(info)
+                && !"zenvis:mcp-approval".equals(info)) {
             return null;
         }
 
@@ -121,6 +124,7 @@ public class ChatMessagePartParser {
                 case "zenvis:notice" -> "notice";
                 case "zenvis:info-steps" -> "info-steps";
                 case "zenvis:analysis-decision" -> "analysis-decision";
+                case "zenvis:analysis-record" -> "analysis-record";
                 case "zenvis:data-access-decision" -> "data-access-decision";
                 case "zenvis:meta-config-record" -> "metadata-config-record";
                 case "zenvis:vectum-task-record" -> "data-push-service-record";
@@ -129,11 +133,14 @@ public class ChatMessagePartParser {
                 case "zenvis:visualization-config-record" -> "visualization-config-record";
                 case "zenvis:dashboard-config-record" -> "dashboard-config-record";
                 case "zenvis:menu-config-record" -> "menu-config-record";
+                case "zenvis:policy-record" -> "policy-record";
+                case "zenvis:mcp-approval" -> "mcp-approval";
                 default -> "confirm";
             };
             ChatMessagePart.ChatMessagePartBuilder builder = part(type)
                     .title(textValue(node, "title"))
-                    .content(firstTextValue(node, "content", "message", "description", "name", "entityLabel", "fileName", "taskId",
+                    .content(firstTextValue(node, "content", "message", "description", "changeDescription", "change_description",
+                            "name", "entityLabel", "fileName", "taskId",
                             "configIndex", "dashboardId", "dashboardCode", "menuId"))
                     .level(firstTextValue(node, "level", "type"))
                     .metadata(metadata);
@@ -142,6 +149,9 @@ public class ChatMessagePartParser {
                     || "analysis-decision".equals(type)
                     || "data-access-decision".equals(type)) {
                 builder.status("pending");
+            } else if ("mcp-approval".equals(type)) {
+                builder.id(textValue(node, "id"))
+                        .status(firstTextValue(node, "status", "state"));
             }
             return builder.build();
         } catch (Exception e) {

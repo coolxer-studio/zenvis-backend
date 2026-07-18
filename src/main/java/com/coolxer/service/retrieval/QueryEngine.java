@@ -5,6 +5,7 @@ import com.coolxer.model.retrieval.query.DataQuery;
 import com.coolxer.model.retrieval.rule.RetrievalPageable;
 
 import java.math.BigDecimal;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
@@ -18,13 +19,32 @@ public interface QueryEngine {
 
     public void deleteIn(String tableName, String keyColumn, List<String> keyValueList);
 
-    public Map<String, Object> findById(String tableName, String id, List<DataAttribute> dataAttributes);
+    public Map<String, Object> findById(String tableName, String keyColumn, String id,
+                                        List<DataAttribute> dataAttributes);
 
     public BigDecimal count(String tableName, Map<String, Object> searchMap);
+
+    /**
+     * 统计任意一个指定字段精确匹配给定值的数据量。
+     *
+     * @param tableName 表名
+     * @param fields    参与 OR 匹配的字段列表
+     * @param value     精确匹配值
+     * @return 匹配的数据量
+     */
+    BigDecimal countAnyOf(String tableName, List<String> fields, String value);
 
     public BigDecimal countToday(String tableName, Map<String, Object> searchMap);
 
     Map<String, Object> countByDateOfWeek(String tableName, String timeField);
+
+    Map<String, Long> countByTimeRange(String tableName,
+                                       String timeField,
+                                       String columnType,
+                                       String timeUnit,
+                                       Date startTime,
+                                       Date endTime,
+                                       boolean hourly);
 
     Map<String, Object> countByField(String tableName, String field);
 
@@ -37,11 +57,5 @@ public interface QueryEngine {
     public List<String> getLike(String tableName, String attribute, String searchTerm);
 
     public Map<String, Object> queryWithRetrieval(DataQuery dataQuery, RetrievalPageable pageable);
-
-    public Map<String, Object> groupAgendaTagsWithWhereClause(String tableName, String whereClause);
-
-    public List<Map<String, Object>> countTypeByHourWithWhereClause(String tableName, String whereClause);
-
-    public List<Map<String, Object>> countTypeByDayWithWhereClause(String tableName, String whereClause);
 
 }

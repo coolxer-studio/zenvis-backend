@@ -3,6 +3,7 @@ package com.coolxer.service.retrieval.impl;
 import com.coolxer.commons.enums.ResultCodeEnum;
 import com.coolxer.commons.exception.ApiException;
 import com.coolxer.model.retrieval.meta.DataAttribute;
+import com.coolxer.model.retrieval.meta.MetaDataConstants;
 import com.coolxer.model.retrieval.query.ColumnCriteria;
 import com.coolxer.model.retrieval.query.ColumnCriteriaExpression;
 import com.coolxer.model.retrieval.query.DataQuery;
@@ -21,10 +22,11 @@ import org.apache.commons.collections4.MapUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -37,6 +39,11 @@ public class QueryEngineImpl implements QueryEngine {
     private static final Pattern IDENTIFIER_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?");
     private static final int DEFAULT_PAGE_SIZE = 10;
     private static final int MAX_PAGE_SIZE = 200;
+    private static final DateTimeFormatter TREND_BOUNDARY_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
+
+    @Value("${app.retrieval.time-zone:Asia/Shanghai}")
+    private String retrievalTimeZone = "Asia/Shanghai";
 
     /**
      * entityManager实现原生查询，unitName是通过clickHouseEntityManagerFactoryBean注入时候指定的名字
@@ -95,13 +102,15 @@ public class QueryEngineImpl implements QueryEngine {
     }
 
     @Transactional
-    public Map<String, Object> findById(String tableName, String id, List<DataAttribute> dataAttributes) {
+    public Map<String, Object> findById(String tableName, String keyColumn, String id,
+                                        List<DataAttribute> dataAttributes) {
         List<DisplayColumn> displayColumnList = dataAttributes.stream().map(attribute -> new DisplayColumn().fromDisplayColumn(attribute)).toList();
         List<String> selectColumnList = displayColumnList.stream().map(this::convertDisplayColumn).toList();
-        List<String> columnList = displayColumnList.stream().map(DisplayColumn::getColumnName).toList();
+        List<String> columnList = displayColumnList.stream().map(DisplayColumn::getDisplayName).toList();
         String columnSelectSql = StringUtils.join(selectColumnList, ",");
 
-        String selectSql = "select " + columnSelectSql + " from " + requireIdentifier(tableName, "表名") + " where id = " + quote(id);
+        String selectSql = "select " + columnSelectSql + " from " + requireIdentifier(tableName, "表名")
+                + " where " + requireIdentifier(keyColumn, "字段名") + " = " + quote(id);
         Query query = entityManager.createNativeQuery(selectSql);
         // 执行查询
         List<Object[]> result = query.getResultList();
@@ -130,6 +139,29 @@ public class QueryEngineImpl implements QueryEngine {
         return queryCount(tableName, whereClause);
     }
 
+    @Override
+    @Transactional
+    public BigDecimal countAnyOf(String tableName, List<String> fields, String value) {
+        if (CollectionUtils.isEmpty(fields)) {
+            throw new ApiException(ResultCodeEnum.FIELD_IS_EMPTY.getCode(), "统计字段不能为空");
+        }
+        if (StringUtils.isBlank(value)) {
+            throw new ApiException(ResultCodeEnum.FIELD_IS_EMPTY.getCode(), "统计值不能为空");
+        }
+        List<String> safeFields = fields.stream()
+                .map(field -> requireIdentifier(field, "字段名"))
+                .distinct()
+                .toList();
+        String countSql = "select count(*) from " + requireIdentifier(tableName, "表名") + " where "
+                + safeFields.stream()
+                .map(field -> field + " = :value")
+                .collect(Collectors.joining(" or "));
+        Query query = entityManager.createNativeQuery(countSql);
+        query.setParameter("value", value);
+        List<BigDecimal> result = query.getResultList();
+        return result.isEmpty() ? BigDecimal.ZERO : result.get(0);
+    }
+
     @Transactional
     public BigDecimal countToday(String tableName, Map<String, Object> searchMap) {
         String whereClause = " where 1=1";
@@ -139,7 +171,7 @@ public class QueryEngineImpl implements QueryEngine {
                     .collect(Collectors.joining(" and "));
         }
         // 补充时间条件
-        whereClause += " and insert_time >= toStartOfDay(now())";
+        whereClause += " and " + MetaDataConstants.INSERT_TIME_COLUMN + " >= toStartOfDay(now())";
         return queryCount(tableName, whereClause);
     }
 
@@ -161,6 +193,93 @@ public class QueryEngineImpl implements QueryEngine {
             resultMap.put(String.valueOf(row[0]), row[1]);
         });
         return resultMap;
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Long> countByTimeRange(String tableName,
+                                              String timeField,
+                                              String columnType,
+                                              String timeUnit,
+                                              Date startTime,
+                                              Date endTime,
+                                              boolean hourly) {
+        if (startTime == null || endTime == null || !startTime.before(endTime)) {
+            throw new ApiException(ResultCodeEnum.INVALID_TIME_RANGE.getCode(), "趋势统计时间范围不合法");
+        }
+        String safeTable = requireIdentifier(tableName, "表名");
+        String safeField = requireIdentifier(timeField, "字段名");
+        String timeExpression = trendTimeExpression(safeField, columnType, timeUnit);
+        String bucketExpression = hourly
+                ? "formatDateTime(toStartOfHour(" + timeExpression + "), '%H:00')"
+                : "formatDateTime(toStartOfDay(" + timeExpression + "), '%F')";
+        String timezone = ZoneId.of(retrievalTimeZone).getId().replace("'", "''");
+        String sql = "SELECT " + bucketExpression + " AS group_key, COUNT(*) AS count FROM "
+                + safeTable + " WHERE " + timeExpression + " >= toDateTime64(:startTime, 3, '" + timezone + "') AND "
+                + timeExpression + " < toDateTime64(:endTime, 3, '" + timezone
+                + "') GROUP BY group_key ORDER BY group_key";
+        Query query = entityManager.createNativeQuery(sql);
+        query.setParameter("startTime", formatTrendBoundary(startTime));
+        query.setParameter("endTime", formatTrendBoundary(endTime));
+        Map<String, Long> resultMap = new LinkedHashMap<>();
+        List<Object[]> result = query.getResultList();
+        for (Object[] row : result) {
+            if (row == null || row.length < 2) {
+                throw new IllegalArgumentException("趋势统计查询结果字段数量不足");
+            }
+            Object count = row[1];
+            long value = count instanceof Number number
+                    ? number.longValue() : Long.parseLong(String.valueOf(count));
+            resultMap.put(String.valueOf(row[0]), value);
+        }
+        return resultMap;
+    }
+
+    private String formatTrendBoundary(Date value) {
+        return TREND_BOUNDARY_FORMATTER.format(value.toInstant().atZone(ZoneId.of(retrievalTimeZone)));
+    }
+
+    private String trendTimeExpression(String safeField, String columnType, String timeUnit) {
+        String baseType = unwrapColumnType(columnType).toLowerCase(Locale.ROOT);
+        String timezone = ZoneId.of(retrievalTimeZone).getId().replace("'", "''");
+        if (baseType.startsWith("datetime")) {
+            return "toTimeZone(" + safeField + ", '" + timezone + "')";
+        }
+        if (baseType.startsWith("date")) {
+            return "toDateTime(" + safeField + ", '" + timezone + "')";
+        }
+        if (isNumericTrendType(baseType)) {
+            String normalizedUnit = StringUtils.lowerCase(StringUtils.trim(timeUnit), Locale.ROOT);
+            if ("seconds".equals(normalizedUnit)) {
+                return "toDateTime(" + safeField + ", '" + timezone + "')";
+            }
+            if ("milliseconds".equals(normalizedUnit)) {
+                return "toDateTime(" + safeField + " / 1000, '" + timezone + "')";
+            }
+        }
+        throw new ApiException(ResultCodeEnum.NO_SUPPORTED.getCode(), "趋势时间字段类型或单位不受支持");
+    }
+
+    private String unwrapColumnType(String columnType) {
+        String current = StringUtils.trimToEmpty(columnType);
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (String wrapper : List.of("Nullable", "LowCardinality")) {
+                String prefix = wrapper + "(";
+                if (current.regionMatches(true, 0, prefix, 0, prefix.length()) && current.endsWith(")")) {
+                    current = current.substring(prefix.length(), current.length() - 1).trim();
+                    changed = true;
+                }
+            }
+        }
+        return current;
+    }
+
+    private boolean isNumericTrendType(String columnType) {
+        return columnType.matches("u?int(8|16|32|64|128|256)")
+                || columnType.matches("float(32|64)")
+                || columnType.startsWith("decimal");
     }
 
     @Override
@@ -265,7 +384,9 @@ public class QueryEngineImpl implements QueryEngine {
 
     @Override
     public Map<String, Object> queryWithRetrieval(DataQuery dataQuery, RetrievalPageable pageable) {
-
+        if (dataQuery == null || CollectionUtils.isEmpty(dataQuery.getDisplayColumnList())) {
+            throw new ApiException(ResultCodeEnum.FIELD_IS_EMPTY.getCode(), "展示字段不能为空");
+        }
         String tableName = requireIdentifier(dataQuery.getTableName(), "表名");
         List<ColumnCriteria> columnCriteria = dataQuery.getColumnCriteria();
         String whereClause = "";
@@ -284,72 +405,11 @@ public class QueryEngineImpl implements QueryEngine {
 
         String columnSelectSql = StringUtils.join(selectColumnList, ",");
         String querySql = "select " + columnSelectSql + " from " + tableName + whereClause + pageClause;
-        log.info("get sql {}", querySql);
+        log.debug("retrieval sql={}", querySql);
         Map<String, Object> resultMap = new HashMap<>();
         resultMap.put("total", queryCount(tableName, whereClause));
         resultMap.put("data", queryResultList(querySql, dataQuery.getDisplayColumnList()));
         return resultMap;
-    }
-
-    @Override
-    @Transactional
-    public Map<String, Object> groupAgendaTagsWithWhereClause(String tableName, String whereClause) {
-        if (StringUtils.isNotEmpty(whereClause)) {
-            whereClause += " and length(agenda_tags) > 0";
-        }
-        String sql = "select arrayStringConcat(groupArray(arrayStringConcat(agenda_tags,',')),',') as agenda_tags_array from " +
-                requireIdentifier(tableName, "表名") + " ";
-        String querySql = sql + whereClause;
-        Query query = entityManager.createNativeQuery(querySql);
-        // 执行查询
-        List<String> result = query.getResultList();
-        String agendaTagsArrayString = "";
-        if (result.size() > 0) {
-            agendaTagsArrayString = result.get(0);
-        }
-        Map<String, Object> resultMap = new HashMap<>();
-        resultMap.put("agenda_tags_array", agendaTagsArrayString);
-        return resultMap;
-    }
-
-    @Override
-    public List<Map<String, Object>> countTypeByHourWithWhereClause(String tableName, String whereClause) {
-        String querySql = "select count(*) as msg_count, fact_type as group_key, toHour(server_time) as time from " +
-                requireIdentifier(tableName, "表名") +
-                " " +
-                whereClause +
-                " group by fact_type ,time order by fact_type ,time";
-        return countTypeWithWhereClause(querySql);
-    }
-
-    @Override
-    public List<Map<String, Object>> countTypeByDayWithWhereClause(String tableName, String whereClause) {
-        String querySql = "select count(*) as msg_count, fact_type as group_key, toDate(server_time) as time from " +
-                requireIdentifier(tableName, "表名") +
-                " " +
-                whereClause +
-                " group by fact_type ,time order by fact_type ,time";
-        return countTypeWithWhereClause(querySql);
-    }
-
-    @Transactional
-    private List<Map<String, Object>> countTypeWithWhereClause(String querySql) {
-        Query query = entityManager.createNativeQuery(querySql);
-        // 执行查询
-        List<Map<String, Object>> resultMapList = new ArrayList<>();
-        List<Object[]> result = query.getResultList();
-        result.forEach(row -> {
-            if (row.length < 3) {
-                // 日志记录或抛出自定义异常
-                throw new IllegalArgumentException("查询结果字段数量不足，期望至少3个字段");
-            }
-            Map<String, Object> resultMap = new HashMap<>();
-            resultMap.put("msg_count", row[0]);
-            resultMap.put("group_key", row[1]);
-            resultMap.put("time", row[2]);
-            resultMapList.add(resultMap);
-        });
-        return resultMapList;
     }
 
     @Transactional
@@ -395,17 +455,21 @@ public class QueryEngineImpl implements QueryEngine {
     private String buildPage(RetrievalPageable pageable) {
         int page = pageable != null && Objects.nonNull(pageable.getPage()) ? pageable.getPage() : 1;
         int size = pageable != null && Objects.nonNull(pageable.getSize()) ? pageable.getSize() : DEFAULT_PAGE_SIZE;
-        page = Math.max(page, 1);
-        size = Math.max(1, Math.min(size, MAX_PAGE_SIZE));
+        if (page < 1 || size < 1 || size > MAX_PAGE_SIZE) {
+            throw new ApiException(ResultCodeEnum.NO_SUPPORTED.getCode(), "分页参数不合法");
+        }
 
         String pageStr = "";
         if (pageable != null && StringUtils.isNotBlank(pageable.getSortBy())) {
             String sortBy = pageable.getSortBy();
             String order = pageable.getOrder();
+            if (StringUtils.isNotBlank(order) && !StringUtils.equalsAnyIgnoreCase(order, "asc", "desc")) {
+                throw new ApiException(ResultCodeEnum.NO_SUPPORTED.getCode(), "排序方向仅支持asc或desc");
+            }
             String orderStr = StringUtils.equalsIgnoreCase(order, "asc") ? "asc" : "desc";
             pageStr = " order by " + requireIdentifier(sortBy, "排序字段") + " " + orderStr;
         }
-        pageStr += " limit " + (page - 1) * size + "," + size;
+        pageStr += " limit " + ((long) (page - 1) * size) + "," + size;
         return pageStr;
     }
 
@@ -414,7 +478,9 @@ public class QueryEngineImpl implements QueryEngine {
         String operatorName = columnCriteria.getOperatorName();
         List<String> valueList = columnCriteria.getValueList() == null ? Collections.emptyList() : columnCriteria.getValueList();
         if (StringUtils.isNotBlank(columnCriteria.getRetrievalType())) {
-            valueList = valueList.stream().map(value -> convertValueList(value, columnCriteria.getRetrievalType())).toList();
+            valueList = valueList.stream()
+                    .map(value -> convertValueList(value, columnCriteria.getRetrievalType(), columnCriteria.getColumnType()))
+                    .toList();
         }
         if (isNullOperator(operatorName)) {
             return buildNullCriteriaSql(columnName, operatorName, columnCriteria.getColumnType());
@@ -478,10 +544,14 @@ public class QueryEngineImpl implements QueryEngine {
                 .collect(Collectors.joining(" " + logic + " ")) + ")";
     }
 
-    private String convertValueList(String origin, String retrievalType) {
+    private String convertValueList(String origin, String retrievalType, String columnType) {
         switch (retrievalType) {
             case "date":
-                long epoch = LocalDateTime.parse(origin, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")).toEpochSecond(ZoneOffset.UTC) * 1000;
+                if (isTemporalType(columnType)) {
+                    return origin;
+                }
+                long epoch = LocalDateTime.parse(origin, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                        .atZone(ZoneId.of(retrievalTimeZone)).toInstant().toEpochMilli();
                 return Long.toString(epoch);
             default:
                 return origin;
@@ -518,10 +588,26 @@ public class QueryEngineImpl implements QueryEngine {
     }
 
     private String formatSingleValue(String value, String columnType, String retrievalType) {
+        if (StringUtils.equalsIgnoreCase(retrievalType, "date") && isTemporalType(columnType)) {
+            return temporalLiteral(value, columnType);
+        }
         if (StringUtils.equalsIgnoreCase(retrievalType, "date") || isNumericType(columnType)) {
             return requireNumberLiteral(value);
         }
         return quote(value);
+    }
+
+    private String temporalLiteral(String value, String columnType) {
+        String baseType = unwrapColumnType(columnType).toLowerCase(Locale.ROOT);
+        if (baseType.startsWith("datetime64")) {
+            String timezone = ZoneId.of(retrievalTimeZone).getId().replace("'", "''");
+            return "toDateTime64(" + quote(value) + ", 3, '" + timezone + "')";
+        }
+        if (baseType.startsWith("datetime")) {
+            String timezone = ZoneId.of(retrievalTimeZone).getId().replace("'", "''");
+            return "toDateTime(" + quote(value) + ", '" + timezone + "')";
+        }
+        return "toDate(" + quote(value) + ")";
     }
 
     private String requireNumberLiteral(String value) {
@@ -540,6 +626,10 @@ public class QueryEngineImpl implements QueryEngine {
                 || lowerType.contains("float")
                 || lowerType.contains("decimal")
                 || lowerType.contains("double");
+    }
+
+    private boolean isTemporalType(String columnType) {
+        return unwrapColumnType(columnType).toLowerCase(Locale.ROOT).startsWith("date");
     }
 
     private boolean isStringType(String columnType) {
@@ -576,6 +666,10 @@ public class QueryEngineImpl implements QueryEngine {
             Map<String, Object> resultMap = new HashMap<>();
             for (int i = 0; i < columnList.size(); i++) {
                 DisplayColumn displayColumn = columnList.get(i);
+                if (rowValues[i] == null) {
+                    resultMap.put(displayColumn.getDisplayName(), null);
+                    continue;
+                }
                 if ("json".equals(displayColumn.getDisplayType())) {
                     String jsonString = rowValues[i].toString();
                     if (jsonString.startsWith("[") && jsonString.endsWith("]")) {

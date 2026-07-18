@@ -1,5 +1,6 @@
 package com.coolxer.model.retrieval.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import lombok.Data;
@@ -10,6 +11,7 @@ import java.util.List;
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public class RetrievalRequestDto {
 
+    @JsonAlias("rule_id")
     private Integer id;
 
     private String type;

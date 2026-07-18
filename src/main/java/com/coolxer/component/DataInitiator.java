@@ -63,6 +63,12 @@ public class DataInitiator {
         // 初始化菜单权限
         initDefaultPermission();
 
+        // 更新内置菜单名称
+        updateBuiltInMenuNames();
+
+        // 补充业务应用服务菜单并继承父菜单权限
+        ensureBusinessServiceMenu();
+
         // 初始化超级管理员账号
         initDefaultSuperAdminUser();
 
@@ -78,13 +84,61 @@ public class DataInitiator {
      * 初始化默认看板
      */
     private void initDefaultDashboard() {
-        if (CollectionUtils.isEmpty(dashboardRepository.findAll())) {
-            // 需要初始化
-            ArrayList<Dashboard> dashboardArrayList = new ArrayList<>();
-            dashboardArrayList.add(new Dashboard().setName("系统总览").setCode("msg-board").setType(DashboardType.BUILT).setUrl(""));
-            dashboardArrayList.add(new Dashboard().setName("外链接视图-测试").setCode("link-test-baidu").setType(DashboardType.LINK).setUrl("https://www.baidu.com"));
-            dashboardRepository.saveAll(dashboardArrayList);
+        Dashboard systemDashboard = dashboardRepository.findByCode("system-board").orElse(null);
+        if (systemDashboard == null) {
+            Dashboard legacyDashboard = dashboardRepository.findByCode("msg-board").orElse(null);
+            if (legacyDashboard != null) {
+                legacyDashboard.setName("系统状态总览");
+                legacyDashboard.setCode("system-board");
+                dashboardRepository.save(legacyDashboard);
+                systemDashboard = legacyDashboard;
+                log.info("已将内置看板编码从 msg-board 迁移为 system-board");
+            } else {
+                List<Dashboard> existingDashboards = dashboardRepository.findAll();
+                systemDashboard = new Dashboard()
+                        .setName("系统状态总览")
+                        .setCode("system-board")
+                        .setType(DashboardType.BUILT)
+                        .setUrl("");
+                if (CollectionUtils.isEmpty(existingDashboards)) {
+                    systemDashboard.setIsDefault(true);
+                    ArrayList<Dashboard> dashboards = new ArrayList<>();
+                    dashboards.add(systemDashboard);
+                    dashboards.add(new Dashboard()
+                            .setName("外链接视图-测试")
+                            .setCode("link-test-baidu")
+                            .setType(DashboardType.LINK)
+                            .setUrl("https://www.baidu.com"));
+                    dashboardRepository.saveAll(dashboards);
+                    return;
+                }
+                dashboardRepository.save(systemDashboard);
+            }
+        }
+        normalizeDefaultDashboard(systemDashboard);
+    }
 
+    private void normalizeDefaultDashboard(Dashboard systemDashboard) {
+        List<Dashboard> dashboards = new ArrayList<>(dashboardRepository.findAll());
+        if (dashboards.stream().noneMatch(item -> "system-board".equals(item.getCode()))) {
+            dashboards.add(systemDashboard);
+        }
+        List<Dashboard> defaults = dashboards.stream()
+                .filter(item -> Boolean.TRUE.equals(item.getIsDefault()))
+                .toList();
+        if (defaults.size() == 1) {
+            return;
+        }
+        Dashboard retained = dashboards.stream()
+                .filter(item -> "system-board".equals(item.getCode()))
+                .findFirst()
+                .orElse(systemDashboard);
+        dashboards.forEach(item -> item.setIsDefault(item == retained));
+        dashboardRepository.saveAll(dashboards);
+        if (defaults.isEmpty()) {
+            log.info("已将系统状态总览设置为默认看板");
+        } else {
+            log.warn("检测到多个默认看板，已保留系统状态总览为唯一默认看板");
         }
     }
 
@@ -103,8 +157,9 @@ public class DataInitiator {
             menuRepository.save(new Menu().setName("静态页面配置").setType(MenuType.POLICY_CONFIG).setRoute(MenuType.POLICY_CONFIG.getRoute()).setParams("html-page").setIsEditable(false).setParentId(policyMenu.getId()).setOrderNumber(2).setLevel(MenuLevel.LEVEL_2));
 
             Menu serviceMenu = menuRepository.save(new Menu().setName("服务管理").setType(MenuType.BUILT_APP).setRoute("system").setIsEditable(false).setParentId(0).setOrderNumber(4).setLevel(MenuLevel.LEVEL_1));
-            menuRepository.save(new Menu().setName("数推服务").setType(MenuType.LOW_CODE_PAGE).setRoute(MenuType.LOW_CODE_PAGE.getRoute()).setParams("push-task").setIsEditable(false).setParentId(serviceMenu.getId()).setOrderNumber(1).setLevel(MenuLevel.LEVEL_2));
-            menuRepository.save(new Menu().setName("分析任务").setType(MenuType.LOW_CODE_PAGE).setRoute(MenuType.LOW_CODE_PAGE.getRoute()).setParams("analysis-task").setIsEditable(false).setParentId(serviceMenu.getId()).setOrderNumber(2).setLevel(MenuLevel.LEVEL_2));
+            menuRepository.save(new Menu().setName("数据推送服务").setType(MenuType.LOW_CODE_PAGE).setRoute(MenuType.LOW_CODE_PAGE.getRoute()).setParams("push-task").setIsEditable(false).setParentId(serviceMenu.getId()).setOrderNumber(1).setLevel(MenuLevel.LEVEL_2));
+            menuRepository.save(new Menu().setName("AI分析任务").setType(MenuType.LOW_CODE_PAGE).setRoute(MenuType.LOW_CODE_PAGE.getRoute()).setParams("analysis-task").setIsEditable(false).setParentId(serviceMenu.getId()).setOrderNumber(2).setLevel(MenuLevel.LEVEL_2));
+            menuRepository.save(new Menu().setName("业务应用服务").setType(MenuType.LOW_CODE_PAGE).setRoute(MenuType.LOW_CODE_PAGE.getRoute()).setParams("business-service").setIsEditable(false).setParentId(serviceMenu.getId()).setOrderNumber(3).setLevel(MenuLevel.LEVEL_2));
 
             Menu systemMenu = menuRepository.save(new Menu().setName("系统管理").setType(MenuType.BUILT_APP).setRoute("system").setIsEditable(false).setParentId(0).setOrderNumber(5).setLevel(MenuLevel.LEVEL_1));
             menuRepository.save(new Menu().setName("菜单管理").setType(MenuType.LOW_CODE_PAGE).setRoute(MenuType.LOW_CODE_PAGE.getRoute()).setParams("menu").setIsEditable(false).setParentId(systemMenu.getId()).setOrderNumber(1).setLevel(MenuLevel.LEVEL_2));
@@ -120,6 +175,82 @@ public class DataInitiator {
         }
 
 
+    }
+
+    /**
+     * 更新已有环境中的内置菜单名称。
+     */
+    private void updateBuiltInMenuNames() {
+        List<Menu> updatedMenus = menuRepository.findAll().stream()
+                .filter(menu -> Boolean.FALSE.equals(menu.getIsEditable()))
+                .filter(menu -> MenuType.LOW_CODE_PAGE == menu.getType())
+                .filter(this::updateBuiltInMenuName)
+                .toList();
+        if (CollectionUtils.isNotEmpty(updatedMenus)) {
+            menuRepository.saveAll(updatedMenus);
+            log.info("已更新 {} 个内置菜单名称", updatedMenus.size());
+        }
+    }
+
+    private boolean updateBuiltInMenuName(Menu menu) {
+        if ("push-task".equals(menu.getParams()) && "数推服务".equals(menu.getName())) {
+            menu.setName("数据推送服务");
+            return true;
+        }
+        if ("analysis-task".equals(menu.getParams()) && "分析任务".equals(menu.getName())) {
+            menu.setName("AI分析任务");
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 为已有环境幂等补充业务应用服务菜单，并让已拥有服务管理权限的角色继承该子菜单。
+     */
+    private void ensureBusinessServiceMenu() {
+        List<Menu> menus = menuRepository.findAll();
+        Menu serviceMenu = menus.stream()
+                .filter(menu -> Integer.valueOf(0).equals(menu.getParentId()))
+                .filter(menu -> "服务管理".equals(menu.getName()))
+                .filter(menu -> Boolean.FALSE.equals(menu.getIsEditable()))
+                .findFirst()
+                .orElse(null);
+        if (serviceMenu == null) {
+            log.warn("未找到内置服务管理菜单，跳过业务应用服务菜单初始化");
+            return;
+        }
+
+        Menu businessServiceMenu = menus.stream()
+                .filter(menu -> serviceMenu.getId().equals(menu.getParentId()))
+                .filter(menu -> "business-service".equals(menu.getParams()))
+                .findFirst()
+                .orElse(null);
+        if (businessServiceMenu == null) {
+            businessServiceMenu = menuRepository.save(new Menu()
+                    .setName("业务应用服务")
+                    .setType(MenuType.LOW_CODE_PAGE)
+                    .setRoute(MenuType.LOW_CODE_PAGE.getRoute())
+                    .setParams("business-service")
+                    .setIsEditable(false)
+                    .setParentId(serviceMenu.getId())
+                    .setOrderNumber(3)
+                    .setLevel(MenuLevel.LEVEL_2));
+            log.info("已新增内置业务应用服务菜单");
+        }
+
+        Integer permissionId = businessServiceMenu.getId();
+        List<RolePermission> inheritedPermissions = rolePermissionRepository
+                .findByPermissionId(serviceMenu.getId()).stream()
+                .map(RolePermission::getRoleId)
+                .distinct()
+                .filter(roleId -> rolePermissionRepository
+                        .findByRoleIdAndPermissionId(roleId, permissionId) == null)
+                .map(roleId -> new RolePermission(roleId, permissionId))
+                .toList();
+        if (CollectionUtils.isNotEmpty(inheritedPermissions)) {
+            rolePermissionRepository.saveAll(inheritedPermissions);
+            log.info("已为 {} 个角色继承业务应用服务菜单权限", inheritedPermissions.size());
+        }
     }
 
     /**

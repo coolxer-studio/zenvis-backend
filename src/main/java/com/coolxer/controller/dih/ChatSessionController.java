@@ -20,6 +20,8 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 
+import static com.coolxer.service.dih.AnalysisDemoResponseService.ANALYSIS_WEB_SHELL_EXAMPLE_PROMPT;
+import static com.coolxer.service.dih.DisposeDemoResponseService.DISPOSE_WEBSHELL_EXAMPLE_PROMPT;
 import static com.coolxer.service.dih.ReportDemoResponseService.REPORT_INCIDENT_REVIEW_EXAMPLE_PROMPT;
 import static com.coolxer.service.dih.ReportDemoResponseService.REPORT_OPERATION_WEEKLY_EXAMPLE_PROMPT;
 import static com.coolxer.service.dih.ReportDemoResponseService.REPORT_USER_EVENT_ANALYSIS_EXAMPLE_PROMPT;
@@ -148,7 +150,7 @@ public class ChatSessionController extends BaseController {
 
             | 字段名 | 样例值 | 中文名 | 字段含义 | 建议类型 | 是否展示 | 查询方式/备注 |
             | --- | --- | --- | --- | --- | --- | --- |
-            | id | 550e8400-e29b-41d4-a716-446655440000 | 事件id | 测试事件唯一标识符 | String | 是 | equal、notequal、in |
+            | event_id | evt-550e8400-e29b-41d4-a716-446655440000 | 事件ID | 业务侧事件标识符 | String | 是 | equal、notequal、in |
             | procid | 104 | 进程id | 产生事件时关联的进程编号 | UInt16 | 是 | greatthan、lessthan、greatequalthan、lessequalthan、between |
             | user | dGVzdC11c2Vy | 用户 | 用户名称或脱敏后的用户标识 | String | 是 | equal、notequal、in |
             | event_type | login | 事件类型 | 用户行为事件类型 | String | 是 | equal、notequal、in；枚举值见关键字段与特殊类型 |
@@ -163,7 +165,7 @@ public class ChatSessionController extends BaseController {
             {
               "event_type": "login",
               "tags": ["登录", "认证"],
-              "id": "550e8400-e29b-41d4-a716-446655440000",
+              "event_id": "evt-550e8400-e29b-41d4-a716-446655440000",
               "user": "dGVzdC11c2Vy",
               "procid": 104,
               "reliability": 8.6,
@@ -180,8 +182,8 @@ public class ChatSessionController extends BaseController {
 
             | 项目 | 内容 |
             | --- | --- |
-            | 唯一标识字段 | id |
-            | 排序字段 | id、server_time |
+            | 业务标识字段 | event_id；平台记录ID `zenvis_id` 由系统自动生成，不需要配置或写入。 |
+            | 排序字段 | server_time |
             | 时间字段 | server_time，格式为 yyyy-MM-dd HH:mm:ss |
             | 枚举字段 | event_type：登录=login、点击=click、浏览=view、删除=delete、修改=modify、其他=other |
             | 数组字段 | tags：Array(String) |
@@ -205,9 +207,9 @@ public class ChatSessionController extends BaseController {
             | 项目 | 内容 |
             | --- | --- |
             | 解析规则 | 将输入日志中的 message 按 JSON 解析为事件对象。 |
-            | 字段映射 | 保留 event_type、tags；自动补齐 id、user、procid、reliability、detail、server_time。 |
+            | 字段映射 | 保留 event_type、tags；自动补齐 event_id、user、procid、reliability、detail、server_time；不映射平台字段 zenvis_id、zenvis_insert_time。 |
             | 清洗规则 | 不过滤，全部保留；ClickHouse 写入时跳过未知字段。 |
-            | 转换规则 | id 使用 UUID；user 使用随机字节的 base64 字符串；procid 生成 100 到 110 的整数；reliability 生成 0.0 到 10.0 的浮点数；detail 固定为 {"method":"POST","path":"/v1/orders","query":"dry_run=false"}；server_time 使用当前时间格式化为 yyyy-MM-dd HH:mm:ss。 |
+            | 转换规则 | event_id 使用业务事件标识；user 使用随机字节的 base64 字符串；procid 生成 100 到 110 的整数；reliability 生成 0.0 到 10.0 的浮点数；detail 固定为 {"method":"POST","path":"/v1/orders","query":"dry_run=false"}；server_time 使用当前时间格式化为 yyyy-MM-dd HH:mm:ss。 |
             | 异常数据处理 | 同时输出到 console，编码为 JSON，便于调试观察。 |
 
             ### 2.3 推送规则
@@ -224,12 +226,14 @@ public class ChatSessionController extends BaseController {
     private static final String DATA_VISUALIZATION_PAGE_EXAMPLE_PROMPT = "请根据用户事件数据生成一个单页面应用。";
     private static final String DATA_VISUALIZATION_APP_EXAMPLE_PROMPT = "请生成一个带侧边栏的用户事件数据应用。";
     private static final String DATA_VISUALIZATION_DASHBOARD_EXAMPLE_PROMPT = "请生成一个用户事件数据看板。";
-    private static final String PROLOGUE_AGENT_ANALYSIS = "我是研判智能体，专注于风险事件的深度分析与等级评估。\n" +
-            " 通过数据聚合、情报关联、规则匹配及动态执行等多维度研判手段，精准评估风险等级合理性。\n" +
-            " 所有研判过程均调用外部工具进行证据链验证，所有分析依据与取证结果将完整存档，确保研判结论可追溯、可复现。";
-    private static final String PROLOGUE_AGENT_DISPOSE = "我是策略智能体，负责系统策略的全生命周期管理。\n" +
-            " 涵盖探针数据采集、动态标记引擎、处置响应、设备指纹、风险评定、数据推送及可视化等策略配置。\n" +
-            " 所有策略变更需经管理员审批后生效，确保系统配置安全可控、合规有效。";
+    private static final String PROLOGUE_AGENT_ANALYSIS = "我是研判分析智能体，面向用户提供的告警信息完成综合研判并输出分析结果。\n" +
+            "我会按三个阶段工作：先根据当前告警关联系统内相关告警日志，再通过 MCP 将聚合日志提交给独立沙箱分析服务，最后形成包含分析目标、分析过程、分析结论和处置建议的研判报告。\n" +
+            "如果告警信息不足，我会先补充询问必要字段；如果缺少沙箱分析 MCP 能力，我会明确说明缺失项，不伪造沙箱结果。";
+    private static final String PROLOGUE_AGENT_ANALYSIS_EXAMPLE_INTRO = "可以点击下面的示例快速体验一次完整告警研判演示。";
+    private static final String PROLOGUE_AGENT_DISPOSE = "我是策略控制智能体，负责根据策略控制需求生成符合系统要求的策略配置。\n" +
+            "我会按三个阶段工作：先生成策略配置并记录到右侧策略记录 tab，再按需进入试验场验证，验证成功且你认可后再下发到系统正式生效。\n" +
+            "支持采集、标记和处置三类策略，所有正式生效动作都会先确认。";
+    private static final String PROLOGUE_AGENT_DISPOSE_EXAMPLE_INTRO = "可以点击下面的示例快速体验一次策略控制演示。";
     private static final String PROLOGUE_AGENT_REPORT = "我是报告智能体，专注于高效生成专业分析报告。\n" +
             " 通过智能编辑器，快速整合分析过程中的数据、图表与结论，实现内容自动生成与文案优化。\n" +
             " 支持一键导入分析素材，助您快速产出结构清晰、内容详实的高质量分析报告。";
@@ -312,6 +316,64 @@ public class ChatSessionController extends BaseController {
                                             Map.of("label", "单页面应用", "prompt", DATA_VISUALIZATION_PAGE_EXAMPLE_PROMPT),
                                             Map.of("label", "带侧边栏应用", "prompt", DATA_VISUALIZATION_APP_EXAMPLE_PROMPT),
                                             Map.of("label", "数据看板", "prompt", DATA_VISUALIZATION_DASHBOARD_EXAMPLE_PROMPT)
+                                    )
+                            ))
+                            .build()
+            ));
+            return message;
+        }
+        if ("agent_analysis".equals(normalizeType(type))) {
+            String content = PROLOGUE_AGENT_ANALYSIS
+                    + "\n\n"
+                    + PROLOGUE_AGENT_ANALYSIS_EXAMPLE_INTRO
+                    + "\n\n"
+                    + "WebShell 告警研判演示";
+            Message message = new Message("ai", content);
+            message.setParts(List.of(
+                    ChatMessagePart.builder()
+                            .type("markdown")
+                            .content(PROLOGUE_AGENT_ANALYSIS)
+                            .build(),
+                    ChatMessagePart.builder()
+                            .type("markdown")
+                            .content(PROLOGUE_AGENT_ANALYSIS_EXAMPLE_INTRO)
+                            .build(),
+                    ChatMessagePart.builder()
+                            .type("prompt-suggestions")
+                            .title("研判分析示例")
+                            .metadata(Map.of(
+                                    "examples",
+                                    List.of(
+                                            Map.of("label", "WebShell 告警研判", "prompt", ANALYSIS_WEB_SHELL_EXAMPLE_PROMPT)
+                                    )
+                            ))
+                            .build()
+            ));
+            return message;
+        }
+        if ("agent_dispose".equals(normalizeType(type))) {
+            String content = PROLOGUE_AGENT_DISPOSE
+                    + "\n\n"
+                    + PROLOGUE_AGENT_DISPOSE_EXAMPLE_INTRO
+                    + "\n\n"
+                    + "WebShell 高危处置策略演示";
+            Message message = new Message("ai", content);
+            message.setParts(List.of(
+                    ChatMessagePart.builder()
+                            .type("markdown")
+                            .content(PROLOGUE_AGENT_DISPOSE)
+                            .build(),
+                    ChatMessagePart.builder()
+                            .type("markdown")
+                            .content(PROLOGUE_AGENT_DISPOSE_EXAMPLE_INTRO)
+                            .build(),
+                    ChatMessagePart.builder()
+                            .type("prompt-suggestions")
+                            .title("策略控制示例")
+                            .metadata(Map.of(
+                                    "examples",
+                                    List.of(
+                                            Map.of("label", "WebShell 高危处置策略", "prompt", DISPOSE_WEBSHELL_EXAMPLE_PROMPT)
                                     )
                             ))
                             .build()

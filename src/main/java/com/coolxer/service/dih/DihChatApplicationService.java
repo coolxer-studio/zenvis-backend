@@ -1,6 +1,7 @@
 package com.coolxer.service.dih;
 
 import com.coolxer.commons.enums.MessageType;
+import com.coolxer.configuration.JacksonConfig;
 import com.coolxer.dao.mysql.entity.ChatSession;
 import com.coolxer.dao.mysql.entity.User;
 import com.coolxer.model.dih.ChatAttachment;
@@ -18,6 +19,11 @@ import com.coolxer.service.dih.agent.skill.SkillService;
 import com.coolxer.service.dih.mcp.AgentMcpToolService;
 import com.coolxer.service.dih.mcp.McpToolContext;
 import com.coolxer.service.dih.mcp.McpToolCallLoggingProvider;
+import com.coolxer.service.dih.mcp.McpApprovalEvent;
+import com.coolxer.service.dih.mcp.McpApprovalService;
+import com.coolxer.service.dih.mcp.McpInvocationContext;
+import com.coolxer.model.dih.vo.McpApprovalVo;
+import com.coolxer.commons.enums.McpInvocationChannel;
 import com.coolxer.service.config.ConfigService;
 import com.coolxer.service.system.DashboardService;
 import com.coolxer.service.system.MenuService;
@@ -29,6 +35,7 @@ import com.coolxer.utils.JacksonUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.BooleanUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
@@ -39,6 +46,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.UUID;
 
 /**
  * DIH 聊天应用编排服务。
@@ -57,6 +66,8 @@ public class DihChatApplicationService {
     private final ChatSessionService chatSessionService;
     private final DataAccessDemoResponseService dataAccessDemoResponseService;
     private final DataVisualizationDemoResponseService dataVisualizationDemoResponseService;
+    private final AnalysisDemoResponseService analysisDemoResponseService;
+    private final DisposeDemoResponseService disposeDemoResponseService;
     private final ReportDemoResponseService reportDemoResponseService;
     private final AnalysisAgent analysisAgent;
     private final DisposeAgent disposeAgent;
@@ -73,11 +84,16 @@ public class DihChatApplicationService {
     private final DashboardService dashboardService;
     private final MenuService menuService;
 
+    @Autowired(required = false)
+    private McpApprovalService mcpApprovalService;
+
     public DihChatApplicationService(AIChatService chatService,
                                      AIBaseService baseService,
                                      ChatSessionService chatSessionService,
                                      DataAccessDemoResponseService dataAccessDemoResponseService,
                                      DataVisualizationDemoResponseService dataVisualizationDemoResponseService,
+                                     AnalysisDemoResponseService analysisDemoResponseService,
+                                     DisposeDemoResponseService disposeDemoResponseService,
                                      ReportDemoResponseService reportDemoResponseService,
                                      AnalysisAgent analysisAgent,
                                      DisposeAgent disposeAgent,
@@ -98,6 +114,8 @@ public class DihChatApplicationService {
         this.chatSessionService = chatSessionService;
         this.dataAccessDemoResponseService = dataAccessDemoResponseService;
         this.dataVisualizationDemoResponseService = dataVisualizationDemoResponseService;
+        this.analysisDemoResponseService = analysisDemoResponseService;
+        this.disposeDemoResponseService = disposeDemoResponseService;
         this.reportDemoResponseService = reportDemoResponseService;
         this.analysisAgent = analysisAgent;
         this.disposeAgent = disposeAgent;
@@ -136,6 +154,24 @@ public class DihChatApplicationService {
         if (!StringUtils.hasText(userMessage)) {
             return errorResponse(eventStream, "消息内容或附件不能为空。");
         }
+        Optional<Flux<String>> analysisDemoResponse = findAnalysisDemoResponse(
+                chatType,
+                chatId,
+                userMessage,
+                currentUser,
+                null
+        );
+        if (analysisDemoResponse.isPresent()) {
+            ChatSession chatSession = appendUserMessage(chatDto, chatType, userMessage, currentUser);
+            return emitAndSaveTextResponse(
+                    analysisDemoResponse.get(),
+                    chatSession,
+                    currentUser,
+                    eventStream,
+                    new AtomicReference<>(MessageType.TEXT),
+                    BooleanUtils.isTrue(chatDto.getDeepThink())
+            );
+        }
         Optional<Flux<String>> reportDemoResponse = findReportDemoResponse(
                 chatType,
                 chatId,
@@ -147,6 +183,24 @@ public class DihChatApplicationService {
             ChatSession chatSession = appendUserMessage(chatDto, chatType, userMessage, currentUser);
             return emitAndSaveTextResponse(
                     reportDemoResponse.get(),
+                    chatSession,
+                    currentUser,
+                    eventStream,
+                    new AtomicReference<>(MessageType.TEXT),
+                    BooleanUtils.isTrue(chatDto.getDeepThink())
+            );
+        }
+        Optional<Flux<String>> disposeDemoResponse = findDisposeDemoResponse(
+                chatType,
+                chatId,
+                userMessage,
+                currentUser,
+                null
+        );
+        if (disposeDemoResponse.isPresent()) {
+            ChatSession chatSession = appendUserMessage(chatDto, chatType, userMessage, currentUser);
+            return emitAndSaveTextResponse(
+                    disposeDemoResponse.get(),
                     chatSession,
                     currentUser,
                     eventStream,
@@ -168,8 +222,19 @@ public class DihChatApplicationService {
                 ? McpToolContext.empty()
                 : agentMcpToolService.resolve(chatType);
         McpToolLogStream mcpToolLogStream = McpToolLogStream.disabled();
+        String turnId = UUID.randomUUID().toString();
         if (mcpToolContext.hasTools()) {
             mcpToolLogStream = McpToolLogStream.create();
+            mcpToolContext = mcpToolContext.withInvocationContext(new McpInvocationContext(
+                    McpInvocationChannel.CHAT_AGENT,
+                    currentUser == null ? null : currentUser.getId(),
+                    chatId,
+                    turnId,
+                    chatType,
+                    null,
+                    null,
+                    mcpToolLogStream::emitApproval
+            ));
             mcpToolContext = mcpToolContext.withToolCallbackProvider(
                     new McpToolCallLoggingProvider(mcpToolContext.toolCallbackProvider(), mcpToolLogStream::emit)
             );
@@ -197,7 +262,12 @@ public class DihChatApplicationService {
             McpToolLogStream finalMcpToolLogStream = mcpToolLogStream;
             fluxResponse = Flux.merge(
                     finalMcpToolLogStream.flux(),
-                    fluxResponse.doFinally(signalType -> finalMcpToolLogStream.complete())
+                    fluxResponse.doFinally(signalType -> {
+                        if (signalType == reactor.core.publisher.SignalType.CANCEL && mcpApprovalService != null) {
+                            mcpApprovalService.cancelTurn(turnId, currentUser == null ? null : currentUser.getId());
+                        }
+                        finalMcpToolLogStream.complete();
+                    })
             );
         }
 
@@ -207,7 +277,8 @@ public class DihChatApplicationService {
                 currentUser,
                 eventStream,
                 messageType,
-                BooleanUtils.isTrue(chatDto.getDeepThink())
+                BooleanUtils.isTrue(chatDto.getDeepThink()),
+                mcpToolLogStream
         );
     }
 
@@ -239,10 +310,30 @@ public class DihChatApplicationService {
         }
         if (AnalysisAgent.AGENT_TYPE.equals(chatType)) {
             messageType.set(MessageType.TEXT);
+            Optional<Flux<String>> demoResponse = findAnalysisDemoResponse(
+                    chatType,
+                    chatId,
+                    prompt,
+                    currentUser,
+                    chatSession
+            );
+            if (demoResponse.isPresent()) {
+                return demoResponse.get();
+            }
             return analysisAgent.chat(chatId, model, prompt, chatDto.getAttachments(), currentUser, mcpToolContext);
         }
         if (DisposeAgent.AGENT_TYPE.equals(chatType)) {
             messageType.set(MessageType.TEXT);
+            Optional<Flux<String>> demoResponse = findDisposeDemoResponse(
+                    chatType,
+                    chatId,
+                    prompt,
+                    currentUser,
+                    chatSession
+            );
+            if (demoResponse.isPresent()) {
+                return demoResponse.get();
+            }
             return disposeAgent.chat(chatId, model, prompt, chatDto.getAttachments(), currentUser, mcpToolContext);
         }
         if (ReportAgent.AGENT_TYPE.equals(chatType)) {
@@ -285,7 +376,8 @@ public class DihChatApplicationService {
                     chatDto.getAttachments(),
                     currentUser,
                     mcpToolContext.toolCallbackProvider(),
-                    mcpToolContext.systemPrompt()
+                    mcpToolContext.systemPrompt(),
+                    mcpToolContext.invocationContext()
             );
         }
 
@@ -297,7 +389,8 @@ public class DihChatApplicationService {
                 chatDto.getAttachments(),
                 currentUser,
                 mcpToolContext.toolCallbackProvider(),
-                mcpToolContext.systemPrompt()
+                mcpToolContext.systemPrompt(),
+                mcpToolContext.invocationContext()
         );
     }
 
@@ -312,17 +405,61 @@ public class DihChatApplicationService {
         return reportDemoResponseService.findResponse(chatSession, chatId, prompt, currentUser);
     }
 
+    private Optional<Flux<String>> findAnalysisDemoResponse(String chatType,
+                                                            String chatId,
+                                                            String prompt,
+                                                            User currentUser,
+                                                            ChatSession chatSession) {
+        if (!AnalysisAgent.AGENT_TYPE.equals(chatType) || analysisDemoResponseService == null) {
+            return Optional.empty();
+        }
+        return analysisDemoResponseService.findResponse(chatSession, chatId, prompt, currentUser);
+    }
+
+    private Optional<Flux<String>> findDisposeDemoResponse(String chatType,
+                                                           String chatId,
+                                                           String prompt,
+                                                           User currentUser,
+                                                           ChatSession chatSession) {
+        if (!DisposeAgent.AGENT_TYPE.equals(chatType) || disposeDemoResponseService == null) {
+            return Optional.empty();
+        }
+        return disposeDemoResponseService.findResponse(chatSession, chatId, prompt, currentUser);
+    }
+
     private Flux<String> emitAndSaveTextResponse(Flux<String> fluxResponse,
                                                  ChatSession chatSession,
                                                  User currentUser,
                                                  boolean eventStream,
                                                  AtomicReference<MessageType> messageType,
                                                  boolean deepThinkRequested) {
+        return emitAndSaveTextResponse(fluxResponse, chatSession, currentUser, eventStream,
+                messageType, deepThinkRequested, McpToolLogStream.disabled());
+    }
+
+    private Flux<String> emitAndSaveTextResponse(Flux<String> fluxResponse,
+                                                 ChatSession chatSession,
+                                                 User currentUser,
+                                                 boolean eventStream,
+                                                 AtomicReference<MessageType> messageType,
+                                                 boolean deepThinkRequested,
+                                                 McpToolLogStream toolActivityStream) {
         StringBuilder modelResponse = new StringBuilder();
         if (eventStream) {
             return fluxResponse
-                    .doOnNext(modelResponse::append)
-                    .map(s -> toNdjson(ChatStreamEvent.delta(s)))
+                    .handle((value, sink) -> {
+                        McpApprovalEvent approvalEvent = McpToolLogStream.parseApprovalEvent(value);
+                        if (approvalEvent != null) {
+                            toolActivityStream.recordApprovalPosition(
+                                    approvalEvent.data() == null ? null : approvalEvent.data().getRequestId(),
+                                    modelResponse.length());
+                            sink.next(toNdjson(ChatStreamEvent.approval(approvalEvent.event(), approvalEvent.data())));
+                            return;
+                        }
+                        modelResponse.append(value);
+                        sink.next(toNdjson(ChatStreamEvent.delta(value)));
+                    })
+                    .cast(String.class)
                     .concatWith(Flux.defer(() -> {
                         Message aiMessage = saveAiResponse(
                                 chatSession,
@@ -330,7 +467,8 @@ public class DihChatApplicationService {
                                 modelResponse.toString(),
                                 messageType.get(),
                                 true,
-                                deepThinkRequested
+                                deepThinkRequested,
+                                toolActivityStream.approvalParts()
                         );
                         return Flux.just(toNdjson(ChatStreamEvent.done(aiMessage)));
                     }))
@@ -341,8 +479,10 @@ public class DihChatApplicationService {
                     });
         }
 
-        return fluxResponse.doOnNext(modelResponse::append)
-                .doOnComplete(() -> saveAiResponse(chatSession, currentUser, modelResponse.toString(), messageType.get(), false, false))
+        return fluxResponse.filter(value -> McpToolLogStream.parseApprovalEvent(value) == null)
+                .doOnNext(modelResponse::append)
+                .doOnComplete(() -> saveAiResponse(chatSession, currentUser, modelResponse.toString(),
+                        messageType.get(), false, false, toolActivityStream.approvalParts()))
                 .doOnError(e -> persistErrorResponse(chatSession, currentUser));
     }
 
@@ -416,10 +556,22 @@ public class DihChatApplicationService {
     }
 
     private Message saveAiResponse(ChatSession chatSession, User currentUser, String content, MessageType type, boolean withParts, boolean deepThinkRequested) {
+        return saveAiResponse(chatSession, currentUser, content, type, withParts, deepThinkRequested, List.of());
+    }
+
+    private Message saveAiResponse(ChatSession chatSession,
+                                   User currentUser,
+                                   String content,
+                                   MessageType type,
+                                   boolean withParts,
+                                   boolean deepThinkRequested,
+                                   List<ChatMessagePart> supplementalParts) {
         Message aiMessage = new Message("ai", content, type);
         List<ChatMessagePart> parts = List.of();
         if (withParts) {
-            parts = new ArrayList<>(chatMessagePartParser.parse(content, type));
+            String parsableContent = insertSupplementalMarkers(content, supplementalParts);
+            parts = new ArrayList<>(chatMessagePartParser.parse(parsableContent, type));
+            parts = mergeSupplementalParts(content, parts, supplementalParts);
             if (deepThinkRequested && parts.stream().noneMatch(part -> "thinking".equals(part.getType()))) {
                 parts.add(0, ChatMessagePart.builder()
                         .id(java.util.UUID.randomUUID().toString())
@@ -444,6 +596,82 @@ public class DihChatApplicationService {
         return aiMessage;
     }
 
+    private String insertSupplementalMarkers(String content, List<ChatMessagePart> supplementalParts) {
+        if (supplementalParts == null || supplementalParts.isEmpty()
+                || supplementalParts.stream().anyMatch(part -> part.getMetadata() == null
+                || !(part.getMetadata().get("contentOffset") instanceof Number))) {
+            return content;
+        }
+        StringBuilder marked = new StringBuilder(content);
+        List<ChatMessagePart> ordered = supplementalParts.stream()
+                .sorted(java.util.Comparator.comparingInt(part ->
+                        ((Number) part.getMetadata().get("contentOffset")).intValue()))
+                .toList();
+        for (int i = ordered.size() - 1; i >= 0; i--) {
+            ChatMessagePart part = ordered.get(i);
+            int offset = Math.max(0, Math.min(marked.length(),
+                    ((Number) part.getMetadata().get("contentOffset")).intValue()));
+            Map<String, Object> marker = new LinkedHashMap<>(part.getMetadata());
+            marker.put("id", part.getId());
+            marker.put("title", part.getTitle());
+            marker.put("content", part.getContent());
+            marker.put("status", part.getStatus());
+            marked.insert(offset, "\n```zenvis:mcp-approval\n" + JacksonUtil.toJson(marker) + "\n```\n");
+        }
+        return marked.toString();
+    }
+
+    private List<ChatMessagePart> mergeSupplementalParts(String content,
+                                                         List<ChatMessagePart> parsedParts,
+                                                         List<ChatMessagePart> supplementalParts) {
+        if (supplementalParts == null || supplementalParts.isEmpty()) {
+            return parsedParts;
+        }
+        java.util.Set<String> parsedApprovalIds = parsedParts.stream()
+                .filter(part -> "mcp-approval".equals(part.getType()))
+                .map(ChatMessagePart::getId)
+                .filter(StringUtils::hasText)
+                .collect(java.util.stream.Collectors.toSet());
+        if (supplementalParts.stream().allMatch(part -> parsedApprovalIds.contains(part.getId()))) {
+            return parsedParts;
+        }
+        boolean plainMarkdown = parsedParts.stream().allMatch(part -> "markdown".equals(part.getType()));
+        boolean hasOffsets = supplementalParts.stream().allMatch(part -> part.getMetadata() != null
+                && part.getMetadata().get("contentOffset") instanceof Number);
+        if (!plainMarkdown || !hasOffsets) {
+            List<ChatMessagePart> merged = new ArrayList<>(supplementalParts);
+            merged.addAll(parsedParts);
+            return merged;
+        }
+
+        List<ChatMessagePart> merged = new ArrayList<>();
+        int cursor = 0;
+        for (ChatMessagePart approval : supplementalParts.stream()
+                .sorted(java.util.Comparator.comparingInt(part ->
+                        ((Number) part.getMetadata().get("contentOffset")).intValue()))
+                .toList()) {
+            int offset = Math.max(cursor, Math.min(content.length(),
+                    ((Number) approval.getMetadata().get("contentOffset")).intValue()));
+            if (offset > cursor) {
+                merged.add(ChatMessagePart.builder()
+                        .id(java.util.UUID.randomUUID().toString())
+                        .type("markdown")
+                        .content(content.substring(cursor, offset))
+                        .build());
+            }
+            merged.add(approval);
+            cursor = offset;
+        }
+        if (cursor < content.length()) {
+            merged.add(ChatMessagePart.builder()
+                    .id(java.util.UUID.randomUUID().toString())
+                    .type("markdown")
+                    .content(content.substring(cursor))
+                    .build());
+        }
+        return merged;
+    }
+
     private void mergeStructuredExtraData(ChatSession chatSession, List<ChatMessagePart> parts, User currentUser) {
         Map<String, Object> patch = buildStructuredExtraDataPatch(parts);
         if (chatSession == null || patch == null || patch.isEmpty()) {
@@ -457,6 +685,13 @@ public class DihChatApplicationService {
                 "dashboardConfigs",
                 "menuConfigs"
         ));
+        mergeSectionRecords(extraData, patch, "analysis", List.of(
+                "records",
+                "aggregatedLogs",
+                "sandboxResults",
+                "conclusionTimeline"
+        ));
+        mergeSectionRecords(extraData, patch, "policy", List.of("records"));
         mergeReportRecords(extraData, patch);
 
         String extraDataJson = JacksonUtil.toJson(extraData);
@@ -483,7 +718,156 @@ public class DihChatApplicationService {
         if (reportPatch != null && !reportPatch.isEmpty()) {
             patch.putAll(reportPatch);
         }
+        Map<String, Object> analysisPatch = buildAnalysisExtraDataPatch(parts);
+        if (analysisPatch != null && !analysisPatch.isEmpty()) {
+            patch.putAll(analysisPatch);
+        }
+        Map<String, Object> policyPatch = buildPolicyExtraDataPatch(parts);
+        if (policyPatch != null && !policyPatch.isEmpty()) {
+            patch.putAll(policyPatch);
+        }
         return patch.isEmpty() ? null : patch;
+    }
+
+    private Map<String, Object> buildPolicyExtraDataPatch(List<ChatMessagePart> parts) {
+        List<Map<String, Object>> records = new ArrayList<>();
+        for (ChatMessagePart part : parts) {
+            if (!"policy-record".equals(part.getType())) {
+                continue;
+            }
+            Map<String, Object> record = buildPolicyRecord(part);
+            if (!record.isEmpty()) {
+                records.add(record);
+            }
+        }
+        if (records.isEmpty()) {
+            return null;
+        }
+
+        Map<String, Object> policy = new LinkedHashMap<>();
+        policy.put("records", records);
+
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("policy", policy);
+        return metadata;
+    }
+
+    private Map<String, Object> buildPolicyRecord(ChatMessagePart part) {
+        Map<String, Object> raw = part.getMetadata() == null ? Map.of() : part.getMetadata();
+        String policyType = firstNonBlank(
+                stringValue(raw, "policyType", null),
+                stringValue(raw, "policy_type", null),
+                stringValue(raw, "type", null)
+        );
+        String configType = firstNonBlank(
+                stringValue(raw, "configType", null),
+                stringValue(raw, "config_type", null),
+                policyConfigType(policyType)
+        );
+        String fileName = firstNonBlank(
+                stringValue(raw, "fileName", null),
+                stringValue(raw, "file_name", null),
+                stringValue(raw, "targetFile", null)
+        );
+        String id = firstNonBlank(
+                stringValue(raw, "recordId", null),
+                stringValue(raw, "record_id", null),
+                stringValue(raw, "id", null),
+                configType != null && fileName != null ? configType + ":" + fileName : null,
+                java.util.UUID.randomUUID().toString()
+        );
+
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("id", id);
+        record.put("recordId", id);
+        record.put("policyType", firstNonBlank(policyType, "disposal"));
+        record.put("changeDescription", firstNonBlank(
+                stringValue(raw, "changeDescription", null),
+                stringValue(raw, "change_description", null),
+                stringValue(raw, "description", null),
+                part.getContent()
+        ));
+        record.put("changeMode", firstNonBlank(
+                stringValue(raw, "changeMode", null),
+                stringValue(raw, "change_mode", null),
+                stringValue(raw, "operation", null),
+                "add"
+        ));
+        record.put("configType", configType);
+        record.put("fileName", fileName);
+        record.put("oldConfig", raw.getOrDefault("oldConfig", raw.getOrDefault("old_config", "")));
+        record.put("newConfig", raw.getOrDefault("newConfig", raw.getOrDefault("new_config", Map.of())));
+        record.put("validationStatus", firstNonBlank(
+                stringValue(raw, "validationStatus", null),
+                stringValue(raw, "validation_status", null),
+                "unverified"
+        ));
+        record.put("effectiveStatus", firstNonBlank(
+                stringValue(raw, "effectiveStatus", null),
+                stringValue(raw, "effective_status", null),
+                "no"
+        ));
+        record.put("trialResult", raw.getOrDefault("trialResult", raw.getOrDefault("trial_result", Map.of())));
+        record.put("applyResult", raw.getOrDefault("applyResult", raw.getOrDefault("apply_result", Map.of())));
+        record.put("updatedAt", firstNonBlank(
+                stringValue(raw, "updatedAt", null),
+                stringValue(raw, "updated_at", null),
+                java.time.OffsetDateTime.now().toString()
+        ));
+        record.put("source", "agent_dispose");
+        record.put("raw", raw);
+        return record;
+    }
+
+    private String policyConfigType(String policyType) {
+        return switch (StringUtils.hasText(policyType) ? policyType : "") {
+            case "collection" -> "checker";
+            case "tagging" -> "rating";
+            case "disposal" -> "punish";
+            default -> null;
+        };
+    }
+
+    private Map<String, Object> buildAnalysisExtraDataPatch(List<ChatMessagePart> parts) {
+        List<Map<String, Object>> records = new ArrayList<>();
+        List<Map<String, Object>> aggregatedLogs = new ArrayList<>();
+        List<Map<String, Object>> sandboxResults = new ArrayList<>();
+        List<Map<String, Object>> conclusionTimeline = new ArrayList<>();
+        for (ChatMessagePart part : parts) {
+            if (!"analysis-record".equals(part.getType())) {
+                continue;
+            }
+            Map<String, Object> record = buildAnalysisRecord(part);
+            records.add(record);
+            String stage = stringValue(record, "stage", "");
+            Map<String, Object> raw = mapValue(record.get("raw"));
+            if ("log_aggregation".equals(stage)) {
+                aggregatedLogs.addAll(extractAnalysisLogRecords(raw));
+            } else if ("sandbox_analysis".equals(stage)) {
+                sandboxResults.add(buildSandboxAnalysisResult(record, raw));
+            } else if ("report_output".equals(stage)) {
+                conclusionTimeline.addAll(extractAnalysisConclusionTimeline(record, raw));
+            }
+        }
+        if (records.isEmpty()) {
+            return null;
+        }
+
+        Map<String, Object> analysis = new LinkedHashMap<>();
+        analysis.put("records", records);
+        if (!aggregatedLogs.isEmpty()) {
+            analysis.put("aggregatedLogs", aggregatedLogs);
+        }
+        if (!sandboxResults.isEmpty()) {
+            analysis.put("sandboxResults", sandboxResults);
+        }
+        if (!conclusionTimeline.isEmpty()) {
+            analysis.put("conclusionTimeline", conclusionTimeline);
+        }
+
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("analysis", analysis);
+        return metadata;
     }
 
     private Map<String, Object> buildDataAccessExtraDataPatch(List<ChatMessagePart> parts) {
@@ -602,6 +986,190 @@ public class DihChatApplicationService {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("report", report);
         return metadata;
+    }
+
+    private Map<String, Object> buildAnalysisRecord(ChatMessagePart part) {
+        Map<String, Object> raw = part.getMetadata() == null ? Map.of() : part.getMetadata();
+        String stage = firstNonBlank(stringValue(raw, "stage", null), "report_output");
+        String title = firstNonBlank(
+                stringValue(raw, "title", null),
+                part.getTitle(),
+                defaultAnalysisStageTitle(stage)
+        );
+        String id = firstNonBlank(
+                stringValue(raw, "recordId", null),
+                stringValue(raw, "record_id", null),
+                stringValue(raw, "id", null),
+                stage
+        );
+
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("id", id);
+        record.put("recordId", id);
+        record.put("stage", stage);
+        record.put("status", stringValue(raw, "status", "completed"));
+        record.put("title", title);
+        record.put("content", firstNonBlank(
+                stringValue(raw, "content", null),
+                stringValue(raw, "message", null),
+                stringValue(raw, "description", null),
+                part.getContent()
+        ));
+        record.put("startedAt", firstNonBlank(stringValue(raw, "startedAt", null), stringValue(raw, "started_at", null)));
+        record.put("completedAt", firstNonBlank(stringValue(raw, "completedAt", null), stringValue(raw, "completed_at", null)));
+        record.put("alarm", raw.getOrDefault("alarm", Map.of()));
+        record.put("evidenceCount", raw.getOrDefault("evidenceCount", raw.getOrDefault("evidence_count", 0)));
+        record.put("riskLevel", firstNonBlank(stringValue(raw, "riskLevel", null), stringValue(raw, "risk_level", null)));
+        record.put("confidence", raw.get("confidence"));
+        record.put("keyFindings", raw.getOrDefault("keyFindings", raw.getOrDefault("key_findings", List.of())));
+        record.put("recommendations", raw.getOrDefault("recommendations", List.of()));
+        record.put("sandboxTaskId", firstNonBlank(stringValue(raw, "sandboxTaskId", null), stringValue(raw, "sandbox_task_id", null)));
+        record.put("toolNames", raw.getOrDefault("toolNames", raw.getOrDefault("tool_names", List.of())));
+        record.put("source", "agent_analysis");
+        record.put("raw", raw);
+        return record;
+    }
+
+    private String defaultAnalysisStageTitle(String stage) {
+        return switch (StringUtils.hasText(stage) ? stage : "") {
+            case "log_aggregation" -> "日志聚合";
+            case "sandbox_analysis" -> "研判分析";
+            case "report_output" -> "输出分析结论";
+            default -> "研判记录";
+        };
+    }
+
+    private List<Map<String, Object>> extractAnalysisLogRecords(Map<String, Object> raw) {
+        List<Map<String, Object>> logs = firstNonEmptyListOfMaps(
+                raw.get("logs"),
+                raw.get("aggregatedLogs"),
+                raw.get("aggregated_logs"),
+                raw.get("relatedLogs"),
+                raw.get("related_logs")
+        );
+        List<Map<String, Object>> normalized = new ArrayList<>();
+        for (int i = 0; i < logs.size(); i++) {
+            Map<String, Object> logRecord = new LinkedHashMap<>(logs.get(i));
+            logRecord.putIfAbsent("id", firstNonBlank(
+                    stringValue(logRecord, "id", null),
+                    stringValue(logRecord, "logId", null),
+                    stringValue(logRecord, "log_id", null),
+                    stringValue(logRecord, "eventId", null),
+                    stringValue(logRecord, "event_id", null),
+                    "analysis-log-" + (i + 1)
+            ));
+            normalized.add(logRecord);
+        }
+        return normalized;
+    }
+
+    private Map<String, Object> buildSandboxAnalysisResult(Map<String, Object> record, Map<String, Object> raw) {
+        Object result = firstNonNull(
+                raw.get("sandboxResult"),
+                raw.get("sandbox_result"),
+                raw.get("result"),
+                raw.get("jsonResult"),
+                raw.get("json_result")
+        );
+        Map<String, Object> sandboxRecord = new LinkedHashMap<>();
+        sandboxRecord.put("id", firstNonBlank(
+                stringValue(raw, "sandboxTaskId", null),
+                stringValue(raw, "sandbox_task_id", null),
+                stringValue(record, "recordId", null),
+                java.util.UUID.randomUUID().toString()
+        ));
+        sandboxRecord.put("taskId", firstNonBlank(stringValue(raw, "sandboxTaskId", null), stringValue(raw, "sandbox_task_id", null)));
+        sandboxRecord.put("status", stringValue(record, "status", "completed"));
+        sandboxRecord.put("title", firstNonBlank(stringValue(record, "title", null), "沙箱研判结果"));
+        sandboxRecord.put("completedAt", stringValue(record, "completedAt", ""));
+        sandboxRecord.put("result", result == null ? raw : result);
+        sandboxRecord.put("raw", raw);
+        return sandboxRecord;
+    }
+
+    private List<Map<String, Object>> extractAnalysisConclusionTimeline(Map<String, Object> record, Map<String, Object> raw) {
+        List<Map<String, Object>> timeline = firstNonEmptyListOfMaps(
+                raw.get("timeline"),
+                raw.get("conclusionTimeline"),
+                raw.get("conclusion_timeline")
+        );
+        if (!timeline.isEmpty()) {
+            return normalizeAnalysisTimeline(timeline, record);
+        }
+
+        List<Map<String, Object>> generated = new ArrayList<>();
+        addAnalysisTimelineItem(generated, "analysis_target", "分析目标", firstNonBlank(
+                stringValue(raw, "analysisTarget", null),
+                stringValue(raw, "analysis_target", null)
+        ), record);
+        addAnalysisTimelineItem(generated, "analysis_process", "分析过程", firstNonBlank(
+                stringValue(raw, "analysisProcess", null),
+                stringValue(raw, "analysis_process", null),
+                stringValue(record, "content", null)
+        ), record);
+        addAnalysisTimelineItem(generated, "analysis_conclusion", "分析结论", firstNonBlank(
+                stringValue(raw, "analysisConclusion", null),
+                stringValue(raw, "analysis_conclusion", null),
+                stringValue(raw, "conclusion", null)
+        ), record);
+        Object recommendationValue = firstNonNull(raw.get("disposalSuggestion"), raw.get("disposal_suggestion"), raw.get("recommendations"));
+        addAnalysisTimelineItem(generated, "disposal_recommendation", "处置建议", timelineContent(recommendationValue), record);
+        return generated;
+    }
+
+    private List<Map<String, Object>> normalizeAnalysisTimeline(List<Map<String, Object>> timeline, Map<String, Object> record) {
+        List<Map<String, Object>> normalized = new ArrayList<>();
+        for (int i = 0; i < timeline.size(); i++) {
+            Map<String, Object> item = new LinkedHashMap<>(timeline.get(i));
+            item.putIfAbsent("id", firstNonBlank(stringValue(item, "id", null), "analysis-timeline-" + (i + 1)));
+            item.putIfAbsent("time", firstNonBlank(
+                    stringValue(item, "time", null),
+                    stringValue(item, "completedAt", null),
+                    stringValue(record, "completedAt", null),
+                    stringValue(record, "startedAt", null)
+            ));
+            item.putIfAbsent("title", "分析结论");
+            item.putIfAbsent("content", firstNonBlank(stringValue(item, "content", null), stringValue(item, "description", null)));
+            normalized.add(item);
+        }
+        return normalized;
+    }
+
+    private void addAnalysisTimelineItem(List<Map<String, Object>> timeline,
+                                         String id,
+                                         String title,
+                                         String content,
+                                         Map<String, Object> record) {
+        if (!StringUtils.hasText(content)) {
+            return;
+        }
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("id", id);
+        item.put("title", title);
+        item.put("content", content);
+        item.put("time", firstNonBlank(stringValue(record, "completedAt", null), stringValue(record, "startedAt", null)));
+        item.put("type", "success");
+        timeline.add(item);
+    }
+
+    private String timelineContent(Object value) {
+        if (value == null) {
+            return "";
+        }
+        if (value instanceof List<?> list) {
+            return list.stream()
+                    .map(item -> item instanceof Map<?, ?> map
+                            ? firstNonBlank(
+                                    map.get("content") == null ? "" : String.valueOf(map.get("content")),
+                                    map.get("title") == null ? "" : String.valueOf(map.get("title")),
+                                    map.get("name") == null ? "" : String.valueOf(map.get("name"))
+                            )
+                            : String.valueOf(item))
+                    .filter(StringUtils::hasText)
+                    .reduce((left, right) -> left + "\n" + right)
+                    .orElse("");
+        }
+        return String.valueOf(value);
     }
 
     private boolean isReportDocumentPart(ChatMessagePart part) {
@@ -1125,6 +1693,31 @@ public class DihChatApplicationService {
         return result;
     }
 
+    private List<Map<String, Object>> firstNonEmptyListOfMaps(Object... values) {
+        if (values == null) {
+            return new ArrayList<>();
+        }
+        for (Object value : values) {
+            List<Map<String, Object>> records = listOfMaps(value);
+            if (!records.isEmpty()) {
+                return records;
+            }
+        }
+        return new ArrayList<>();
+    }
+
+    private Object firstNonNull(Object... values) {
+        if (values == null) {
+            return null;
+        }
+        for (Object value : values) {
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> firstObject(Object value) {
         if (value instanceof List<?> list && !list.isEmpty() && list.get(0) instanceof Map<?, ?> map) {
@@ -1163,18 +1756,29 @@ public class DihChatApplicationService {
 
     private static class McpToolLogStream {
 
+        private static final String APPROVAL_EVENT_PREFIX = "\u001ezenvis-mcp-approval:";
+
         private final Sinks.Many<String> sink;
 
-        private McpToolLogStream(Sinks.Many<String> sink) {
+        private final Map<String, McpApprovalVo> approvalStates;
+
+        private final Map<String, Integer> approvalOffsets;
+
+        private McpToolLogStream(Sinks.Many<String> sink,
+                                 Map<String, McpApprovalVo> approvalStates,
+                                 Map<String, Integer> approvalOffsets) {
             this.sink = sink;
+            this.approvalStates = approvalStates;
+            this.approvalOffsets = approvalOffsets;
         }
 
         private static McpToolLogStream create() {
-            return new McpToolLogStream(Sinks.many().multicast().onBackpressureBuffer());
+            return new McpToolLogStream(Sinks.many().multicast().onBackpressureBuffer(),
+                    new ConcurrentHashMap<>(), new ConcurrentHashMap<>());
         }
 
         private static McpToolLogStream disabled() {
-            return new McpToolLogStream(null);
+            return new McpToolLogStream(null, Map.of(), Map.of());
         }
 
         private boolean enabled() {
@@ -1192,6 +1796,67 @@ public class DihChatApplicationService {
             sink.tryEmitNext(formatLog(logEvent));
         }
 
+        private void emitApproval(McpApprovalEvent approvalEvent) {
+            if (!enabled() || approvalEvent == null || approvalEvent.data() == null) {
+                return;
+            }
+            approvalStates.put(approvalEvent.data().getRequestId(), approvalEvent.data());
+            sink.tryEmitNext(APPROVAL_EVENT_PREFIX + JacksonUtil.toJson(approvalEvent));
+        }
+
+        private static McpApprovalEvent parseApprovalEvent(String value) {
+            if (value == null || !value.startsWith(APPROVAL_EVENT_PREFIX)) {
+                return null;
+            }
+            return JacksonUtil.toObject(value.substring(APPROVAL_EVENT_PREFIX.length()), McpApprovalEvent.class);
+        }
+
+        private void recordApprovalPosition(String requestId, int contentOffset) {
+            if (enabled() && StringUtils.hasText(requestId)) {
+                approvalOffsets.putIfAbsent(requestId, Math.max(contentOffset, 0));
+            }
+        }
+
+        private List<ChatMessagePart> approvalParts() {
+            if (approvalStates.isEmpty()) {
+                return List.of();
+            }
+            return approvalStates.values().stream()
+                    .sorted(java.util.Comparator.comparing(McpApprovalVo::getCreateTime,
+                            java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())))
+                    .map(approval -> toApprovalPart(approval, approvalOffsets.get(approval.getRequestId())))
+                    .toList();
+        }
+
+        private static ChatMessagePart toApprovalPart(McpApprovalVo approval, Integer contentOffset) {
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("requestId", approval.getRequestId());
+            metadata.put("toolKey", approval.getToolKey());
+            metadata.put("toolName", approval.getToolName());
+            metadata.put("sourceType", approval.getSourceType());
+            metadata.put("serverName", approval.getServerName());
+            metadata.put("channel", approval.getChannel());
+            metadata.put("policy", approval.getPolicy());
+            metadata.put("approvalScope", approval.getApprovalScope());
+            metadata.put("argumentsSummary", approval.getArgumentsSummary());
+            metadata.put("resultSummary", approval.getResultSummary());
+            metadata.put("errorSummary", approval.getErrorSummary());
+            metadata.put("riskLevel", approval.getRiskLevel());
+            metadata.put("expireTime", approval.getExpireTime());
+            if (contentOffset != null) {
+                metadata.put("contentOffset", contentOffset);
+            }
+            return ChatMessagePart.builder()
+                    .id(approval.getRequestId())
+                    .type("mcp-approval")
+                    .title("MCP 工具审批：" + approval.getToolName())
+                    .content(approval.getDescription())
+                    .status(approval.getStatus() == null ? "pending"
+                            : approval.getStatus().name().toLowerCase(java.util.Locale.ROOT))
+                    .metadata(metadata)
+                    .build();
+        }
+
         private void complete() {
             if (enabled()) {
                 sink.tryEmitComplete();
@@ -1201,33 +1866,42 @@ public class DihChatApplicationService {
         private static String formatLog(McpToolCallLoggingProvider.McpToolCallLog logEvent) {
             String toolName = inlineCode(logEvent.toolName());
             if ("started".equals(logEvent.status())) {
-                return "\n\n> MCP调用开始：" + toolName + formatArguments(logEvent.arguments()) + "\n\n";
+                return "\n\n**MCP调用开始：** " + toolName
+                        + formatPayload("调用参数", logEvent.arguments())
+                        + "\n\n";
             }
             if ("succeeded".equals(logEvent.status())) {
-                return "\n\n> MCP调用成功：" + toolName
+                return "\n\n**MCP调用成功：** " + toolName
                         + formatDuration(logEvent.durationMillis())
-                        + formatResult(logEvent.result())
+                        + formatPayload("返回结果", logEvent.result())
                         + "\n\n";
             }
             if ("failed".equals(logEvent.status())) {
-                return "\n\n> MCP调用失败：" + toolName
+                return "\n\n**MCP调用失败：** " + toolName
                         + formatDuration(logEvent.durationMillis())
-                        + formatError(logEvent.error())
+                        + formatPayload("错误信息", logEvent.error())
                         + "\n\n";
             }
-            return "\n\n> MCP调用日志：" + toolName + "\n\n";
+            return "\n\n**MCP调用日志：** " + toolName + "\n\n";
         }
 
-        private static String formatArguments(String arguments) {
-            return StringUtils.hasText(arguments) ? "，参数：" + inlineCode(arguments) : "";
-        }
-
-        private static String formatResult(String result) {
-            return StringUtils.hasText(result) ? "，返回：" + inlineCode(result) : "";
-        }
-
-        private static String formatError(String error) {
-            return StringUtils.hasText(error) ? "，错误：" + inlineCode(error) : "";
+        private static String formatPayload(String title, String payload) {
+            if (!StringUtils.hasText(payload)) {
+                return "";
+            }
+            String language = "text";
+            String formatted = payload;
+            try {
+                var json = JacksonConfig.OBJECT_MAPPER.readTree(payload);
+                if (json != null) {
+                    formatted = JacksonConfig.OBJECT_MAPPER.writerWithDefaultPrettyPrinter()
+                            .writeValueAsString(json);
+                    language = "json";
+                }
+            } catch (Exception ignored) {
+                // Non-JSON tool output is still rendered in a plaintext code card.
+            }
+            return "\n\n" + title + "：\n\n```" + language + "\n" + formatted + "\n```";
         }
 
         private static String formatDuration(Long durationMillis) {

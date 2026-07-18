@@ -34,14 +34,14 @@ public final class BuiltinAgentSkillRegistry {
                     AGENT_ANALYSIS,
                     "研判分析",
                     30,
-                    "研判分析智能体能力正在建设中，当前 Skill 仅用于入口占位。"
+                    "研判分析智能体根据用户提供的告警信息，按日志聚合、沙箱研判、分析结论三阶段完成综合研判。"
             ),
             new BuiltinAgentSkill(
                     "dispose-agent",
                     AGENT_DISPOSE,
                     "策略控制",
                     40,
-                    "策略控制智能体可生成采集、标记评分和处置策略，并通过配置管理 MCP 完成受控发布。"
+                    "策略控制智能体按策略记录、试验场验证、正式下发三阶段生成采集、标记和处置策略配置。"
             ),
             new BuiltinAgentSkill(
                     "report-agent",
