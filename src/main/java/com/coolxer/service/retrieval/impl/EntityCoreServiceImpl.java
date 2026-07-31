@@ -10,22 +10,16 @@ import com.coolxer.model.retrieval.rule.RetrievalPageable;
 import com.coolxer.service.retrieval.EntityCoreService;
 import com.coolxer.service.retrieval.MetaDataService;
 import com.coolxer.service.retrieval.QueryEngine;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
-@Slf4j
 public class EntityCoreServiceImpl implements EntityCoreService {
-
-    private static final List<String> IP_FIELD_NAMES = List.of("src_ip", "dst_ip", "dest_ip");
 
     @Autowired
     private MetaDataService metaDataService;
@@ -223,172 +217,6 @@ public class EntityCoreServiceImpl implements EntityCoreService {
             return queryEngine.count(dataEntity.getTableName(), searchMapDto).longValue();
         }
         return 0;
-    }
-
-    @Override
-    public Map<String, Object> count(List<String> entities) {
-        Map<String, Object> countData = new HashMap<>();
-        for (String entityName : entities) {
-            DataEntity dataEntity = metaDataService.getDataEntityByName(entityName);
-            if (dataEntity != null) {
-                countData.put(entityName, queryEngine.countToday(dataEntity.getTableName(), null).longValue());
-            }
-        }
-        return countData;
-    }
-
-    @Override
-    public Map<String, Object> countToady(List<String> entities) {
-        Map<String, Object> countData = new HashMap<>();
-        for (String entityName : entities) {
-            DataEntity dataEntity = metaDataService.getDataEntityByName(entityName);
-            if (dataEntity != null) {
-                countData.put(entityName, queryEngine.count(dataEntity.getTableName(), null).longValue());
-            }
-        }
-        return countData;
-    }
-
-    @Override
-    public Map<String, Object> trend(List<String> entities) {
-        List<String> assetNames = new ArrayList<>();
-        List<String> assetLabels = new ArrayList<>();
-        List<Map<String, Object>> trendDataList = new ArrayList<>();
-        for (String entityName : entities) {
-            DataEntity dataEntity = metaDataService.getDataEntityByName(entityName);
-            if (dataEntity != null) {
-                assetNames.add(dataEntity.getName());
-                assetLabels.add(dataEntity.getLabel());
-                Map<String, Object> result = queryEngine.countByDateOfWeek(
-                        dataEntity.getTableName(), MetaDataConstants.INSERT_TIME_COLUMN);
-                trendDataList.add(result);
-            }
-        }
-        // 获取最近7天日期（格式：yyyy-MM-dd 00:00:00）
-        List<String> dateList = new ArrayList<>();
-        LocalDate today = LocalDate.now();
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd 00:00:00.0");
-        for (int i = 6; i >= 0; i--) {
-            dateList.add(today.minusDays(i).format(formatter));
-        }
-        // 组装series数据
-        Map<String, List<Long>> seriesMap = new LinkedHashMap<>();
-        for (int i = 0; i < assetNames.size(); i++) {
-            String key = assetNames.get(i);
-            Map<String, Object> trendData = trendDataList.get(i);
-            List<Long> values = new ArrayList<>();
-            for (String date : dateList) {
-                Object v = trendData.getOrDefault(date, 0L);
-                values.add(Long.parseLong(String.valueOf(v)));
-            }
-            seriesMap.put(key, values);
-        }
-        // 组装返回结构
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("legend_data", assetLabels);
-        result.put("xaxis_data", dateList);
-        // 每个资产类型一组series
-        for (int i = 0; i < assetLabels.size(); i++) {
-            result.put("series_data_" + assetNames.get(i), seriesMap.get(assetNames.get(i)));
-        }
-        return result;
-    }
-
-    @Override
-    public Map<String, Object> statistics(List<String> entities, String field) {
-        Map<String, Object> statisticsData = new HashMap<>();
-        List<String> assetNames = new ArrayList<>();
-        List<String> assetLabels = new ArrayList<>();
-        Set<String> keySet = new HashSet<>();
-        List<Map<String, Object>> levelDataList = new ArrayList<>();
-        for (String entityName : entities) {
-            DataEntity dataEntity = metaDataService.getDataEntityByName(entityName);
-            if (dataEntity != null) {
-                DataAttribute dataAttribute = metaDataService.getDataAttributeByName(entityName, field);
-                if (dataAttribute == null) {
-                    throw new ApiException(ResultCodeEnum.NO_SUPPORTED.getCode(), "统计字段不存在: " + field);
-                }
-                assetNames.add(dataEntity.getName());
-                assetLabels.add(dataEntity.getLabel());
-                Map<String, Object> result = queryEngine.countByField(dataEntity.getTableName(), dataAttribute.getColumnName());
-                keySet.addAll(result.keySet());
-                levelDataList.add(result);
-            }
-        }
-        statisticsData.put("yaxis_data", assetLabels);
-
-        // 按资产类型遍历，填充每个等级的数量
-        for (Map<String, Object> resultMap : levelDataList) {
-            for (String key : keySet) {
-                Long value = ((BigDecimal) resultMap.getOrDefault(key, BigDecimal.valueOf(0))).longValue();
-                List<Long> series = (List<Long>) statisticsData.getOrDefault("series_data_" + key, new ArrayList<Long>());
-                series.add(value);
-                statisticsData.put("series_data_" + key, series);
-            }
-        }
-        return statisticsData;
-    }
-
-    @Override
-    public Map<String, Object> ipStatistics(List<String> entities, String ip) {
-        String normalizedIp = ip == null ? null : ip.trim();
-        if (normalizedIp == null || normalizedIp.isEmpty()) {
-            throw new ApiException(ResultCodeEnum.FIELD_IS_EMPTY.getCode(), "IP不能为空");
-        }
-        LinkedHashSet<String> uniqueEntities = entities == null ? new LinkedHashSet<>() : entities.stream()
-                .filter(Objects::nonNull)
-                .map(String::trim)
-                .filter(entity -> !entity.isEmpty())
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-        if (uniqueEntities.isEmpty()) {
-            throw new ApiException(ResultCodeEnum.FIELD_IS_EMPTY.getCode(), "实体列表不能为空");
-        }
-
-        List<Map<String, Object>> rows = new ArrayList<>();
-        List<String> xaxisData = new ArrayList<>();
-        List<Long> seriesData = new ArrayList<>();
-        long total = 0L;
-        int matchedEntityCount = 0;
-        for (String entityName : uniqueEntities) {
-            DataEntity dataEntity = metaDataService.getDataEntityByName(entityName);
-            if (dataEntity == null) {
-                continue;
-            }
-            Map<String, DataAttribute> attributesByName = metaDataService.getAllDataAttributeByEntity(dataEntity)
-                    .stream()
-                    .collect(Collectors.toMap(DataAttribute::getName, Function.identity(), (first, second) -> first));
-            List<String> logicalFields = IP_FIELD_NAMES.stream()
-                    .filter(attributesByName::containsKey)
-                    .toList();
-            List<String> columns = logicalFields.stream()
-                    .map(field -> attributesByName.get(field).getColumnName())
-                    .toList();
-            long entityTotal = columns.isEmpty()
-                    ? 0L : queryEngine.countAnyOf(dataEntity.getTableName(), columns, normalizedIp).longValue();
-            if (entityTotal > 0) {
-                matchedEntityCount++;
-            }
-            total += entityTotal;
-
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("entity", dataEntity.getName());
-            row.put("label", dataEntity.getLabel());
-            row.put("fields", logicalFields);
-            row.put("total", entityTotal);
-            rows.add(row);
-            xaxisData.add(dataEntity.getLabel());
-            seriesData.add(entityTotal);
-        }
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("ip", normalizedIp);
-        result.put("total", total);
-        result.put("entity_count", rows.size());
-        result.put("matched_entity_count", matchedEntityCount);
-        result.put("rows", rows);
-        result.put("xaxis_data", xaxisData);
-        result.put("series_data", seriesData);
-        return result;
     }
 
     private Map<String, String> getColumnValueMap(String entityName, Map<String, Object> mapDto) {

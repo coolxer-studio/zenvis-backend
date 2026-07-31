@@ -12,11 +12,29 @@ public interface PushTaskService {
 
     boolean createAndStart(PushTaskDto pushTaskDto);
 
+    boolean updateAndStart(Integer id, PushTaskDto pushTaskDto);
+
+    default boolean update(Integer id, PushTaskDto pushTaskDto) {
+        return false;
+    }
+
+    default boolean toggle(Integer id) {
+        return false;
+    }
+
+    default boolean delete(Integer id) {
+        return false;
+    }
+
     List<PushTaskVo> findAll();
+
+    PushTaskVo findById(Integer id);
 
     List<PushTaskVo> findBySourceMark(String sourceMark);
 
     boolean deleteBySourceMark(String sourceMark);
+
+    String getLog(Integer id, String logType);
 
     String detectFormat(String content);
 }

@@ -20,7 +20,6 @@ import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientSseClientTransport;
 import io.modelcontextprotocol.spec.McpSchema;
-import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -29,8 +28,12 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.ai.mcp.McpToolUtils;
 import org.springframework.ai.mcp.SyncMcpToolCallbackProvider;
 import org.springframework.ai.tool.ToolCallbackProvider;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.event.EventListener;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.StandardEnvironment;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -70,18 +73,21 @@ public class McpClientServiceImpl implements McpClientService {
     private final boolean allowPrivateServerUrls;
     private final McpApprovalService approvalService;
     private final McpToolPolicyService policyService;
+    private final Environment environment;
 
     @Autowired
     public McpClientServiceImpl(McpServerConfigRepository mcpServerConfigRepository,
                                 ObjectMapper objectMapper,
                                 McpApprovalService approvalService,
                                 McpToolPolicyService policyService,
+                                Environment environment,
                                 @Value("${spring.ai.mcp.server.version:1.0.0}") String clientVersion,
                                 @Value("${app.ai.mcp.allow-private-server-urls:true}") boolean allowPrivateServerUrls) {
         this.mcpServerConfigRepository = mcpServerConfigRepository;
         this.objectMapper = objectMapper;
         this.approvalService = approvalService;
         this.policyService = policyService;
+        this.environment = environment;
         this.clientVersion = clientVersion;
         this.allowPrivateServerUrls = allowPrivateServerUrls;
     }
@@ -91,16 +97,31 @@ public class McpClientServiceImpl implements McpClientService {
                          String clientVersion,
                          boolean allowPrivateServerUrls,
                          boolean ignoredAllowDestructiveToolCalls) {
+        this(mcpServerConfigRepository, objectMapper, new StandardEnvironment(), clientVersion,
+                allowPrivateServerUrls, ignoredAllowDestructiveToolCalls);
+    }
+
+    McpClientServiceImpl(McpServerConfigRepository mcpServerConfigRepository,
+                         ObjectMapper objectMapper,
+                         Environment environment,
+                         String clientVersion,
+                         boolean allowPrivateServerUrls,
+                         boolean ignoredAllowDestructiveToolCalls) {
         this.mcpServerConfigRepository = mcpServerConfigRepository;
         this.objectMapper = objectMapper;
         this.approvalService = null;
         this.policyService = null;
+        this.environment = environment;
         this.clientVersion = clientVersion;
         this.allowPrivateServerUrls = allowPrivateServerUrls;
     }
 
-    @PostConstruct
-    public void init() {
+    /**
+     * A plugin may expose its MCP SSE endpoint from this same web application, so
+     * clients must not initialize until Tomcat is listening.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void initializeEnabledServersAfterStartup() {
         refreshEnabledServers();
     }
 
@@ -443,9 +464,10 @@ public class McpClientServiceImpl implements McpClientService {
     }
 
     private McpSyncClient createClient(McpServerConfig config) {
-        validateBaseUrl(config.getBaseUrl());
+        String baseUrl = resolvePlaceholders(config.getBaseUrl());
+        validateBaseUrl(baseUrl);
         Map<String, String> headers = parseHeaders(config.getHeaders());
-        HttpClientSseClientTransport.Builder transportBuilder = HttpClientSseClientTransport.builder(config.getBaseUrl())
+        HttpClientSseClientTransport.Builder transportBuilder = HttpClientSseClientTransport.builder(baseUrl)
                 .sseEndpoint(config.getSseEndpoint())
                 .connectTimeout(Duration.ofSeconds(config.getConnectTimeoutSeconds()));
         if (!headers.isEmpty()) {
@@ -473,7 +495,8 @@ public class McpClientServiceImpl implements McpClientService {
             return Map.of();
         }
         try {
-            Map<String, Object> raw = objectMapper.readValue(headers, new TypeReference<LinkedHashMap<String, Object>>() {
+            String resolvedHeaders = resolvePlaceholders(headers);
+            Map<String, Object> raw = objectMapper.readValue(resolvedHeaders, new TypeReference<LinkedHashMap<String, Object>>() {
             });
             Map<String, String> parsed = new LinkedHashMap<>();
             raw.forEach((key, value) -> {
@@ -539,7 +562,7 @@ public class McpClientServiceImpl implements McpClientService {
 
     private void validateBaseUrl(String baseUrl) {
         try {
-            URI uri = URI.create(StringUtils.trimToEmpty(baseUrl));
+            URI uri = URI.create(StringUtils.trimToEmpty(resolvePlaceholders(baseUrl)));
             String scheme = uri.getScheme();
             String host = uri.getHost();
             if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
@@ -556,6 +579,18 @@ public class McpClientServiceImpl implements McpClientService {
                 throw apiException;
             }
             throw new ApiException(ResultCodeEnum.NO_SUPPORTED.getCode(), "MCP服务地址格式不正确");
+        }
+    }
+
+    private String resolvePlaceholders(String value) {
+        if (StringUtils.isBlank(value) || environment == null) {
+            return value;
+        }
+        try {
+            return environment.resolveRequiredPlaceholders(value);
+        } catch (IllegalArgumentException e) {
+            throw new ApiException(ResultCodeEnum.NO_SUPPORTED.getCode(),
+                    "MCP配置包含无法解析的属性占位符");
         }
     }
 

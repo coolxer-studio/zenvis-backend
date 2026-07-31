@@ -26,6 +26,7 @@ import com.coolxer.model.system.vo.RoleVo;
 import com.coolxer.model.system.vo.UserVo;
 import com.coolxer.service.config.ConfigService;
 import com.coolxer.service.system.CryptService;
+import com.coolxer.utils.BCrypt;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -109,6 +110,7 @@ class SuperAdminServiceTest {
         ReflectionTestUtils.setField(dataInitiator, "userRoleRepository", userRoleRepository);
         ReflectionTestUtils.setField(dataInitiator, "menuRepository", menuRepository);
         ReflectionTestUtils.setField(dataInitiator, "rolePermissionRepository", rolePermissionRepository);
+        ReflectionTestUtils.setField(dataInitiator, "bootstrapSuperAdminPassword", "super-admin-test-password");
 
         when(roleRepository.findByIsSuperAdmin(true)).thenReturn(List.of());
         when(roleRepository.findByName(SystemBuiltInConstants.SUPER_ADMIN_ROLE_NAME)).thenReturn(List.of());
@@ -139,6 +141,7 @@ class SuperAdminServiceTest {
         verify(userRepository).save(userCaptor.capture());
         assertThat(userCaptor.getValue().getEmail()).isEqualTo(SystemBuiltInConstants.SUPER_ADMIN_EMAIL);
         assertThat(userCaptor.getValue().getIsSuperAdmin()).isTrue();
+        assertThat(BCrypt.checkpw("super-admin-test-password", userCaptor.getValue().getPassword())).isTrue();
 
         ArgumentCaptor<UserRole> userRoleCaptor = ArgumentCaptor.forClass(UserRole.class);
         verify(userRoleRepository).save(userRoleCaptor.capture());
@@ -151,24 +154,61 @@ class SuperAdminServiceTest {
     }
 
     @Test
-    void existingBuiltInServiceMenusAreRenamed() {
+    void initDefaultSuperAdminUserRejectsMissingBootstrapPasswordForNewDatabase() {
+        DataInitiator dataInitiator = new DataInitiator();
+        ReflectionTestUtils.setField(dataInitiator, "userRepository", userRepository);
+        ReflectionTestUtils.setField(dataInitiator, "roleRepository", roleRepository);
+        ReflectionTestUtils.setField(dataInitiator, "userRoleRepository", userRoleRepository);
+        ReflectionTestUtils.setField(dataInitiator, "menuRepository", menuRepository);
+        ReflectionTestUtils.setField(dataInitiator, "rolePermissionRepository", rolePermissionRepository);
+        ReflectionTestUtils.setField(dataInitiator, "bootstrapSuperAdminPassword", "");
+
+        when(userRepository.findByIsSuperAdmin(true)).thenReturn(List.of());
+        when(userRepository.findByEmail(SystemBuiltInConstants.SUPER_ADMIN_EMAIL)).thenReturn(null);
+
+        assertThatThrownBy(dataInitiator::initDefaultSuperAdminUser)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("ZENVIS_BOOTSTRAP_SUPER_ADMIN_PASSWORD");
+    }
+
+    @Test
+    void existingBuiltInPushTaskMenuIsRenamed() {
         DataInitiator dataInitiator = new DataInitiator();
         ReflectionTestUtils.setField(dataInitiator, "menuRepository", menuRepository);
 
         Menu pushTaskMenu = builtInServiceMenu("数推服务", "push-task");
-        Menu analysisTaskMenu = builtInServiceMenu("分析任务", "analysis-task");
         Menu editableMenu = builtInServiceMenu("数推服务", "push-task").setIsEditable(true);
-        when(menuRepository.findAll()).thenReturn(List.of(pushTaskMenu, analysisTaskMenu, editableMenu));
+        when(menuRepository.findAll()).thenReturn(List.of(pushTaskMenu, editableMenu));
 
         ReflectionTestUtils.invokeMethod(dataInitiator, "updateBuiltInMenuNames");
 
         assertThat(pushTaskMenu.getName()).isEqualTo("数据推送服务");
-        assertThat(analysisTaskMenu.getName()).isEqualTo("AI分析任务");
         assertThat(editableMenu.getName()).isEqualTo("数推服务");
 
         ArgumentCaptor<Iterable<Menu>> menusCaptor = ArgumentCaptor.forClass(Iterable.class);
         verify(menuRepository).saveAll(menusCaptor.capture());
-        assertThat(menusCaptor.getValue()).containsExactly(pushTaskMenu, analysisTaskMenu);
+        assertThat(menusCaptor.getValue()).containsExactly(pushTaskMenu);
+    }
+
+    @Test
+    void legacyBuiltInAnalysisTaskMenuAndPermissionsAreRemoved() {
+        DataInitiator dataInitiator = new DataInitiator();
+        ReflectionTestUtils.setField(dataInitiator, "menuRepository", menuRepository);
+        ReflectionTestUtils.setField(dataInitiator, "rolePermissionRepository", rolePermissionRepository);
+
+        Menu analysisTaskMenu = builtInServiceMenu("AI分析任务", "analysis-task");
+        analysisTaskMenu.setId(22);
+        Menu editableMenu = builtInServiceMenu("自定义分析页面", "analysis-task").setIsEditable(true);
+        editableMenu.setId(23);
+        RolePermission permission = new RolePermission(3, 22);
+        when(menuRepository.findAll()).thenReturn(List.of(analysisTaskMenu, editableMenu));
+        when(rolePermissionRepository.findByPermissionId(22)).thenReturn(List.of(permission));
+
+        ReflectionTestUtils.invokeMethod(dataInitiator, "removeLegacyAnalysisTaskMenu");
+
+        verify(rolePermissionRepository).deleteAll(List.of(permission));
+        verify(menuRepository).delete(analysisTaskMenu);
+        verify(menuRepository, never()).delete(editableMenu);
     }
 
     @Test
@@ -200,7 +240,7 @@ class SuperAdminServiceTest {
         verify(menuRepository).save(menuCaptor.capture());
         assertThat(menuCaptor.getValue().getName()).isEqualTo("业务应用服务");
         assertThat(menuCaptor.getValue().getParams()).isEqualTo("business-service");
-        assertThat(menuCaptor.getValue().getOrderNumber()).isEqualTo(3);
+        assertThat(menuCaptor.getValue().getOrderNumber()).isEqualTo(2);
 
         ArgumentCaptor<Iterable<RolePermission>> permissionCaptor = ArgumentCaptor.forClass(Iterable.class);
         verify(rolePermissionRepository).saveAll(permissionCaptor.capture());
@@ -218,7 +258,8 @@ class SuperAdminServiceTest {
         Menu serviceMenu = new Menu().setName("服务管理").setParentId(0).setIsEditable(false);
         serviceMenu.setId(4);
         Menu businessServiceMenu = builtInServiceMenu("业务应用服务", "business-service")
-                .setParentId(4);
+                .setParentId(4)
+                .setOrderNumber(2);
         businessServiceMenu.setId(30);
         when(menuRepository.findAll()).thenReturn(List.of(serviceMenu, businessServiceMenu));
         when(rolePermissionRepository.findByPermissionId(4)).thenReturn(List.of());

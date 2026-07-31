@@ -8,8 +8,12 @@ import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.ai.tool.metadata.ToolMetadata;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.HexFormat;
 import java.util.function.Consumer;
 
 /**
@@ -75,25 +79,77 @@ public class McpToolCallLoggingProvider implements ToolCallbackProvider {
 
         private String callInternal(String toolInput, ToolContext toolContext) {
             String toolName = toolName();
+            ToolRuntimeContext runtimeContext = resolveRuntimeContext(toolContext);
+            if (runtimeContext != null && runtimeContext.stopRequested()) {
+                throw new IllegalStateException(
+                        "工具执行已停止：" + runtimeContext.stopReason());
+            }
             long startedAt = System.nanoTime();
-            emit(McpToolCallLog.started(toolName, summarize(toolInput, MAX_ARGUMENT_CHARS)));
+            emit(McpToolCallLog.started(
+                    toolName, summarize(toolInput, MAX_ARGUMENT_CHARS), toolInput));
             log.info("MCP工具调用开始: tool={}, arguments={}", toolName, summarize(toolInput, MAX_ARGUMENT_CHARS));
             try {
                 String result = toolContext == null
                         ? delegate.call(toolInput)
                         : delegate.call(toolInput, toolContext);
                 long durationMillis = elapsedMillis(startedAt);
-                emit(McpToolCallLog.succeeded(toolName, durationMillis, summarize(result, MAX_RESULT_CHARS)));
+                emit(McpToolCallLog.succeeded(
+                        toolName, durationMillis, summarize(result, MAX_RESULT_CHARS), result));
                 log.info("MCP工具调用成功: tool={}, durationMs={}, result={}",
                         toolName, durationMillis, summarize(result, MAX_RESULT_CHARS));
                 return result;
             } catch (RuntimeException e) {
                 long durationMillis = elapsedMillis(startedAt);
+                if (runtimeContext != null) {
+                    runtimeContext.registerFailure(
+                            executionFailureSignature(toolName, toolInput, e));
+                }
                 emit(McpToolCallLog.failed(toolName, durationMillis, summarize(e.getMessage(), MAX_RESULT_CHARS)));
                 log.warn("MCP工具调用失败: tool={}, durationMs={}, error={}",
                         toolName, durationMillis, e.getMessage(), e);
                 throw e;
             }
+        }
+
+        private ToolRuntimeContext resolveRuntimeContext(ToolContext toolContext) {
+            if (toolContext == null || toolContext.getContext() == null) {
+                return null;
+            }
+            Object configured = toolContext.getContext().get(
+                    ToolRuntimeContext.TOOL_CONTEXT_KEY);
+            return configured instanceof ToolRuntimeContext runtimeContext
+                    ? runtimeContext
+                    : null;
+        }
+
+        private String executionFailureSignature(
+                String toolName,
+                String toolInput,
+                RuntimeException exception) {
+            Throwable root = exception;
+            while (root.getCause() != null && root.getCause() != root) {
+                root = root.getCause();
+            }
+            String canonical = toolName
+                    + "\n" + normalizeSignatureText(toolInput, false)
+                    + "\n" + root.getClass().getName()
+                    + "\n" + normalizeSignatureText(root.getMessage(), true);
+            try {
+                byte[] digest = MessageDigest.getInstance("SHA-256")
+                        .digest(canonical.getBytes(StandardCharsets.UTF_8));
+                return "tool_execution:" + HexFormat.of().formatHex(digest);
+            } catch (NoSuchAlgorithmException e) {
+                throw new IllegalStateException("当前 JVM 不支持 SHA-256", e);
+            }
+        }
+
+        private String normalizeSignatureText(String value, boolean replaceNumbers) {
+            String normalized = StringUtils.hasText(value)
+                    ? value.replaceAll("\\s+", "")
+                    : "";
+            return replaceNumbers
+                    ? normalized.replaceAll("\\d+", "#")
+                    : normalized;
         }
 
         private void emit(McpToolCallLog event) {
@@ -132,18 +188,33 @@ public class McpToolCallLoggingProvider implements ToolCallbackProvider {
                                  String result,
                                  String error,
                                  Long durationMillis,
-                                 Instant time) {
+                                 Instant time,
+                                 String rawArguments,
+                                 String rawResult) {
 
         public static McpToolCallLog started(String toolName, String arguments) {
-            return new McpToolCallLog("started", toolName, arguments, null, null, null, Instant.now());
+            return started(toolName, arguments, arguments);
+        }
+
+        public static McpToolCallLog started(
+                String toolName, String arguments, String rawArguments) {
+            return new McpToolCallLog("started", toolName, arguments, null, null, null,
+                    Instant.now(), rawArguments, null);
         }
 
         public static McpToolCallLog succeeded(String toolName, long durationMillis, String result) {
-            return new McpToolCallLog("succeeded", toolName, null, result, null, durationMillis, Instant.now());
+            return succeeded(toolName, durationMillis, result, result);
+        }
+
+        public static McpToolCallLog succeeded(
+                String toolName, long durationMillis, String result, String rawResult) {
+            return new McpToolCallLog("succeeded", toolName, null, result, null,
+                    durationMillis, Instant.now(), null, rawResult);
         }
 
         public static McpToolCallLog failed(String toolName, long durationMillis, String error) {
-            return new McpToolCallLog("failed", toolName, null, null, error, durationMillis, Instant.now());
+            return new McpToolCallLog("failed", toolName, null, null, error,
+                    durationMillis, Instant.now(), null, null);
         }
     }
 }

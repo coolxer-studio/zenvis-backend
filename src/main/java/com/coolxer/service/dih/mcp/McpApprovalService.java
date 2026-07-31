@@ -54,8 +54,7 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class McpApprovalService {
 
-    private static final int MAX_ARGUMENT_CHARS = 4000;
-    private static final int MAX_RESULT_CHARS = 2000;
+    private static final int MAX_ERROR_CHARS = 2000;
     private static final Set<String> SENSITIVE_KEYS = Set.of(
             "password", "passwd", "pwd", "token", "secret", "authorization", "apikey", "api_key",
             "accesstoken", "access_token", "refreshtoken", "refresh_token", "privatekey", "private_key",
@@ -104,12 +103,23 @@ public class McpApprovalService {
                           Callable<String> delegate) {
         McpInvocationContext executionContext = context == null
                 ? McpInvocationContext.background(null) : context;
-        McpApprovalPolicy policy = policyService.effectivePolicy(descriptor.toolKey(), descriptor.defaultPolicy());
-        boolean sessionGranted = policy == McpApprovalPolicy.ASK
+        McpApprovalPolicy configuredPolicy = policyService.effectivePolicy(
+                descriptor.toolKey(),
+                descriptor.defaultPolicy());
+        boolean explicitDemoApproval =
+                executionContext.requiresExplicitDemoApproval()
+                        && descriptor.defaultPolicy() == McpApprovalPolicy.ASK
+                        && configuredPolicy != McpApprovalPolicy.DENY;
+        McpApprovalPolicy policy = explicitDemoApproval
+                ? McpApprovalPolicy.ASK : configuredPolicy;
+        boolean sessionGranted = !explicitDemoApproval
+                && policy == McpApprovalPolicy.ASK
                 && chatToolGrantService.isGranted(executionContext, descriptor.toolKey());
-        boolean taskGranted = policy == McpApprovalPolicy.ASK
+        boolean taskGranted = !explicitDemoApproval
+                && policy == McpApprovalPolicy.ASK
                 && taskToolGrantService.isGranted(executionContext, descriptor.toolKey());
-        boolean taskAutoApproved = policy == McpApprovalPolicy.ASK
+        boolean taskAutoApproved = !explicitDemoApproval
+                && policy == McpApprovalPolicy.ASK
                 && executionContext.analysisTaskId() != null
                 && executionContext.taskApprovalMode() == AnalysisTaskApprovalMode.AUTO;
         boolean approvalRequired = policy == McpApprovalPolicy.ASK
@@ -183,8 +193,10 @@ public class McpApprovalService {
                 }
                 return deniedResult(invocation, executionContext, "AI分析任务已取消");
             }
+            McpAuditPayloadUtils.StoredPayload auditResult = McpAuditPayloadUtils.prepareResult(result);
             invocation.setStatus(McpInvocationStatus.SUCCEEDED)
-                    .setResultSummary(summarizeJson(result, MAX_RESULT_CHARS))
+                    .setResult(auditResult.value())
+                    .setResultLength(auditResult.originalLength())
                     .setDurationMillis(elapsedMillis(startedAt))
                     .setFinishTime(new Date());
             invocationRepository.save(invocation);
@@ -204,7 +216,7 @@ public class McpApprovalService {
                 return deniedResult(invocation, executionContext, "AI分析任务已取消");
             }
             invocation.setStatus(McpInvocationStatus.FAILED)
-                    .setErrorSummary(summarizeJson(e.getMessage(), MAX_RESULT_CHARS))
+                    .setErrorSummary(summarizeJson(e.getMessage(), MAX_ERROR_CHARS))
                     .setDurationMillis(elapsedMillis(startedAt))
                     .setFinishTime(new Date());
             invocationRepository.save(invocation);
@@ -261,15 +273,19 @@ public class McpApprovalService {
         long startedAt = System.nanoTime();
         try {
             Object result = delegate.call();
+            String serializedResult = serializeResult(result);
+            McpAuditPayloadUtils.StoredPayload auditResult =
+                    McpAuditPayloadUtils.prepareResult(serializedResult);
             invocation.setStatus(McpInvocationStatus.SUCCEEDED)
-                    .setResultSummary(summarizeObject(result, MAX_RESULT_CHARS))
+                    .setResult(auditResult.value())
+                    .setResultLength(auditResult.originalLength())
                     .setDurationMillis(elapsedMillis(startedAt))
                     .setFinishTime(new Date());
             invocationRepository.save(invocation);
             return new McpToolCallResultVo(requestId, invocation.getStatus(), result, null);
         } catch (Exception e) {
             invocation.setStatus(McpInvocationStatus.FAILED)
-                    .setErrorSummary(summarizeJson(e.getMessage(), MAX_RESULT_CHARS))
+                    .setErrorSummary(summarizeJson(e.getMessage(), MAX_ERROR_CHARS))
                     .setDurationMillis(elapsedMillis(startedAt))
                     .setFinishTime(new Date());
             invocationRepository.save(invocation);
@@ -373,6 +389,12 @@ public class McpApprovalService {
     }
 
     private void assertSessionApprovalSupported(McpToolInvocation invocation) {
+        if (McpInvocationContext.isExplicitApprovalDemoClient(
+                invocation.getMcpClientInfo())) {
+            throw new ApiException(
+                    400,
+                    "内置演示必须逐次审批，不支持本会话始终允许");
+        }
         if (invocation.getChannel() != McpInvocationChannel.CHAT_AGENT
                 || invocation.getRequesterUserId() == null
                 || StringUtils.isBlank(invocation.getChatId())) {
@@ -488,6 +510,9 @@ public class McpApprovalService {
         String keyword = StringUtils.trimToEmpty(criteria.getKeyword()).toLowerCase(Locale.ROOT);
         Specification<McpToolInvocation> specification = (root, query, builder) -> {
             ArrayList<Predicate> predicates = new ArrayList<>();
+            if (StringUtils.isNotBlank(criteria.getRequestId())) {
+                predicates.add(builder.equal(root.get("requestId"), criteria.getRequestId().trim()));
+            }
             if (!isSuperAdmin(currentUser)) {
                 predicates.add(builder.equal(root.get("requesterUserId"),
                         currentUser == null ? -1 : currentUser.getId()));
@@ -678,7 +703,7 @@ public class McpApprovalService {
                 .setTaskExecutionId(context.executionId())
                 .setMcpSessionId(context.mcpSessionId())
                 .setMcpClientInfo(context.mcpClientInfo())
-                .setArgumentsSummary(summarizeJson(toolInput, MAX_ARGUMENT_CHARS))
+                .setArguments(McpAuditPayloadUtils.fitLongText(toolInput))
                 .setArgumentsDigest(digest(toolInput));
         if (status == McpInvocationStatus.PENDING && !isManualAnalysisTask(context)) {
             invocation.setExpireTime(new Date(now.getTime() + timeoutMillis));
@@ -796,11 +821,14 @@ public class McpApprovalService {
         }
     }
 
-    private String summarizeObject(Object value, int maxChars) {
+    private String serializeResult(Object value) {
+        if (value == null) {
+            return null;
+        }
         try {
-            return summarizeJson(objectMapper.writeValueAsString(value), maxChars);
+            return objectMapper.writeValueAsString(value);
         } catch (Exception e) {
-            return summarize(String.valueOf(value), maxChars);
+            return String.valueOf(value);
         }
     }
 

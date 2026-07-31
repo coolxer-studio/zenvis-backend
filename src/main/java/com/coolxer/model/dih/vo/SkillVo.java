@@ -60,6 +60,16 @@ public class SkillVo implements Serializable {
     private Boolean enabled = false;
 
     /**
+     * DIH 聊天入口配置。未配置或 chat.enabled=false 时不展示。
+     */
+    private SkillChatConfigVo chat;
+
+    /**
+     * 可选的 DIH 运行时提示词、工具白名单和预算配置。
+     */
+    private SkillRuntimeConfigVo runtime;
+
+    /**
      * 入口文件，默认 SKILL.md
      */
     private String entry = "SKILL.md";

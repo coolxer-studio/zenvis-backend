@@ -30,8 +30,9 @@ public class McpApprovalVo {
     private String agentType;
     private Integer analysisTaskId;
     private String taskExecutionId;
-    private String argumentsSummary;
-    private String resultSummary;
+    private String arguments;
+    private String result;
+    private Long resultLength;
     private String errorSummary;
     private Integer decisionBy;
     private String decisionComment;
@@ -41,6 +42,7 @@ public class McpApprovalVo {
     private Long durationMillis;
     private Date createTime;
     private String riskLevel;
+    private Boolean sessionApprovalAllowed;
 
     public McpApprovalVo(McpToolInvocation invocation) {
         this.requestId = invocation.getRequestId();
@@ -60,8 +62,9 @@ public class McpApprovalVo {
         this.agentType = invocation.getAgentType();
         this.analysisTaskId = invocation.getAnalysisTaskId();
         this.taskExecutionId = invocation.getTaskExecutionId();
-        this.argumentsSummary = invocation.getArgumentsSummary();
-        this.resultSummary = invocation.getResultSummary();
+        this.arguments = invocation.getArguments();
+        this.result = invocation.getResult();
+        this.resultLength = invocation.getResultLength();
         this.errorSummary = invocation.getErrorSummary();
         this.decisionBy = invocation.getDecisionBy();
         this.decisionComment = invocation.getDecisionComment();
@@ -72,5 +75,10 @@ public class McpApprovalVo {
         this.createTime = invocation.getCreateTime();
         this.riskLevel = invocation.getRiskLevel() == null
                 ? "unknown" : invocation.getRiskLevel().name().toLowerCase(java.util.Locale.ROOT);
+        this.sessionApprovalAllowed =
+                invocation.getChannel() == McpInvocationChannel.CHAT_AGENT
+                        && !com.coolxer.service.dih.mcp.McpInvocationContext
+                        .isExplicitApprovalDemoClient(
+                                invocation.getMcpClientInfo());
     }
 }

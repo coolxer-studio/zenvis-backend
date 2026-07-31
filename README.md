@@ -1,27 +1,17 @@
-# ZenVis — 数据分析应用框架
-
-![图标](doc/banner.jpg)
-
-**ZenVis** 是一个基于配置实现的数据存储、可视化及业务扩展的框架平台，实现在通用的数据分析框架之上构建业务应用。提供智能分析能力，全方位满足数据处理、展示、扩展与深度分析需求。
-
-***
-
-## 项目简介
+# 项目简介
 
 ZenVis Backend 是基于 Spring Boot构建的ZenVis的后端项目，提供仪表盘、数据检索、策略管理、数据集成等核心接口功能模块。
 
 ## 快速运行 ZenVis（含前后端） 服务
 
-### 1. docker-compose 运行（推荐）
+### 1. Docker Compose 运行（推荐）
 
 ```bash
-cd zenvis-backend/deploy
-docker-compose up -d
+cd zenvis/deploy
+docker compose up -d
 ```
 
-> 默认运行架构为amd64架构，如果需要运行在arm架构上需要修改.env文件：ARCH=arm64  
-> 默认用户名: admin@admin.com   
-> 默认密码: admin@!QAZ2wsx
+> 默认运行架构由项目根目录 `deploy/.env` 中的 `ARCH` 决定。初始化账号由部署配置创建，首次登录后应立即修改密码；不要在 README 或生产脚本中固化真实凭据。
 
 ### 2. 服务访问
 
@@ -29,7 +19,8 @@ docker-compose up -d
 |:------------|:--------------------------------------------|
 | web前端服务     | `http://<ip>:11000`                         |
 | API 接口 服务   | `http://<ip>:11001`                         |
-| MCP 接口 服务   | `http://<ip>:11002/sse`                     |
+| MCP 接口服务    | `http://<ip>:11001/sse`                     |
+| Vectum 数据服务 | `http://<ip>:11002`                         |
 | Swagger 文档  | `http://<ip>:11001/swagger-ui/index.html`   |
 
 ***
@@ -105,7 +96,7 @@ ZenVis = **配置化数据存储 + 可视化引擎 + 检索分析 + 插件扩展
 
 ## 四、系统架构
 
-【待补充】
+整体拓扑、模块边界和数据流见[系统架构](../doc/06-架构设计/README.md)。本模块负责后端 API、权限、检索、插件生命周期、DIH/MCP 和业务服务管理。
 
 ### 架构分层
 
@@ -131,7 +122,8 @@ ZenVis = **配置化数据存储 + 可视化引擎 + 检索分析 + 插件扩展
 | :--------- | :---------------------- |
 | MySQL      | 存储业务数据（用户、角色、菜单、配置等）    |
 | ClickHouse | 存储插件定义的时序数据、事件数据和分析指标 |
-| Redis      | 缓存和向量存储（会话管理、AI 向量检索）   |
+| Redis      | Session、缓存和运行状态 |
+| Redis Stack | 插件文档向量索引与 RAG |
 
 ***
 
@@ -145,9 +137,11 @@ ZenVis = **配置化数据存储 + 可视化引擎 + 检索分析 + 插件扩展
 | 框架      | Spring Boot         | 3.2.0    |
 | AI 框架   | Spring AI           | 1.1.0-M4 |
 | AI 服务   | OpenAI              | -        |
-| 关系型数据库  | MySQL               | 8.0+     |
-| 时序数据库   | ClickHouse          | 22.3+    |
-| 缓存/向量存储 | Redis / Redis Stack | 7.0+     |
+| 关系型数据库  | MySQL               | 当前 Compose：8.4 |
+| 分析数据库   | ClickHouse          | 当前 Compose：25.9 |
+| 缓存       | Redis               | 当前 Compose：7 |
+| 向量存储    | Redis Stack         | 当前 Compose：7.2.0-v18 |
+| 消息队列    | Kafka               | 当前 Compose：4.2.0 |
 | ORM     | Spring Data JPA     | -        |
 | API 文档  | SpringDoc OpenAPI   | 2.3.0    |
 | 构建工具    | Maven               | 3.8+     |
@@ -157,9 +151,8 @@ ZenVis = **配置化数据存储 + 可视化引擎 + 检索分析 + 插件扩展
 
 - JDK 17+
 - Maven 3.8+
-- MySQL 8.0+
-- ClickHouse 22.3+
-- Redis 7.0+
+- MySQL、ClickHouse、Redis；启用 RAG 时还需要 Redis Stack
+- 运行数据接入任务时还需要 Kafka 与 Vectum
 
 ### 3. 启动方式
 
@@ -181,7 +174,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=dev
 
 ### 4. 构建与部署
 
-\######## 打包构建
+#### 打包构建
 
 ```bash
 # 打包
@@ -229,7 +222,10 @@ PUSH_IMAGE=true ./build.sh
 | Profile | 说明       |
 | :------ | :------- |
 | `dev`   | 开发环境     |
-| `main`  | 生产环境（默认） |
+| `prod`  | 容器/生产环境 |
+| `saas`  | SaaS 环境 |
+
+`application.properties` 当前默认激活 `dev`，并可选导入 `./config/local-secrets.properties`。部署时应显式选择目标 Profile 或使用外部 `application.properties`。
 
 ### 主要配置项
 
@@ -241,10 +237,14 @@ PUSH_IMAGE=true ./build.sh
 | `MYSQL_PASSWORD`                         | -           | MySQL 密码，通过环境变量或本地密钥文件注入 |
 | `CLICKHOUSE_PASSWORD`                    | -           | ClickHouse 密码，通过环境变量或本地密钥文件注入 |
 | `REDIS_PASSWORD`                         | -           | Redis 密码，通过环境变量或本地密钥文件注入 |
+| `VECTUM_AUTH_TOKEN`                     | -           | Vectum 服务 Bearer Token |
+| `ZENVIS_BOOTSTRAP_SUPER_ADMIN_PASSWORD` | -           | 新库首次创建超级管理员时使用，不重置已有账号 |
+| `ZENVIS_BOOTSTRAP_ADMIN_PASSWORD`       | -           | 新库首次创建机构管理员时使用，不重置已有账号 |
 | `spring.data.redis.host`                 | `localhost` | Redis 主机地址            |
 | `spring.data.redis.port`                 | `6379`      | Redis 端口              |
 | `spring.ai.openai.base-url`              | -           | OpenAI 兼容模型服务地址；未配置不影响启动，调用 AI 功能时报错 |
 | `spring.ai.openai.api-key`               | -           | OpenAI API Key           |
+| `app.ai.openai.force-http1`              | `true`      | 强制 OpenAI 兼容请求使用 HTTP/1.1，避免明文 h2c 升级兼容问题 |
 | `app.security.api.bearer-token`          | -           | 普通 REST API Bearer Token；配置后 `/api/v1/**` 支持 `Authorization: Bearer <token>` |
 | `app.security.api.bearer-user`           | `admin@admin.com` | Bearer Token 调用映射到的系统用户邮箱，用于权限上下文和审计 |
 | `app.security.mcp.bearer-token`          | -           | MCP Server Bearer Token，未配置时 MCP 接口返回 401 |
@@ -261,6 +261,9 @@ MCP 客户端访问 Spring AI MCP Server 接口时需要携带请求头：`Autho
 MYSQL_PASSWORD=your_mysql_password
 CLICKHOUSE_PASSWORD=your_clickhouse_password
 REDIS_PASSWORD=your_redis_password
+VECTUM_AUTH_TOKEN=your_vectum_token
+ZENVIS_BOOTSTRAP_SUPER_ADMIN_PASSWORD=your_initial_super_admin_password
+ZENVIS_BOOTSTRAP_ADMIN_PASSWORD=your_initial_admin_password
 OPENAI_BASE_URL=https://your-llm-endpoint
 OPENAI_API_KEY=your_api_key
 OPENAI_CHAT_MODEL=your_chat_model
@@ -273,7 +276,7 @@ MCP_BEARER_TOKEN=your_mcp_token
 
 ### 数据库初始化
 
-**MySQL**：执行 `deploy/config/mysql/init.sql` 创建数据库和用户：
+**MySQL**：Compose 部署由 MySQL 镜像根据 `deploy/.env` 中的 `MYSQL_DATABASE`、`MYSQL_USER` 和密码变量创建数据库与账号，不再执行仓库内的固定初始化 SQL。外部 MySQL 可由数据库管理员执行等价操作：
 
 ```sql
 CREATE DATABASE IF NOT EXISTS zenvis CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -289,47 +292,44 @@ FLUSH PRIVILEGES;
 ## 七、项目结构
 
 ```
-zenvis-backend/
-├── src/main/java/com/coolxer/
-│   ├── Application.java              # 启动类
-│   ├── aop/                          # 切面处理
-│   │   ├── AuthorityInterceptor.java # 权限拦截器
-│   │   ├── LogAopAspect.java         # 日志切面
-│   │   └── ApiExceptionHandler.java  # 全局异常处理
-│   ├── commons/                      # 公共模块
-│   │   ├── constants/                # 常量定义
-│   │   ├── enums/                    # 枚举类
-│   │   └── exception/                # 异常类
-│   ├── component/                    # Spring 组件
-│   ├── configuration/                # 配置类
-│   ├── controller/                   # REST API 控制器
-│   │   ├── dashboard/                # 仪表盘
-│   │   ├── dih/                      # 深度思考助手
-│   │   ├── policy/                   # 策略配置
-│   │   ├── retrieval/                # 检索引擎
-│   │   └── system/                   # 系统管理
-│   ├── dao/                          # 数据访问层
-│   │   ├── clickhouse/               # ClickHouse 实体和仓库
-│   │   └── mysql/                    # MySQL 实体和仓库
-│   ├── model/                        # 数据模型
-│   ├── service/                      # 业务服务层
-│   └── utils/                        # 工具类
-├── src/main/resources/               # 资源文件
-├── deploy/                           # 部署配置
-│   ├── config/                       # 各服务配置
-│   │   ├── clickhouse/               # ClickHouse 配置
-│   │   ├── mysql/                    # MySQL 配置
-│   │   ├── redis/                    # Redis 配置
-│   │   ├── redis-stack/              # Redis Stack 配置
-│   │   ├── zenvis-backend/           # 后端配置
-│   │   └── zenvis-frontend/          # 前端配置
-│   └── data/                         # 数据目录
-├── doc/                              # 文档资源
-├── Dockerfile                        # Docker 配置
-├── build.sh                          # 构建脚本
-├── LICENSE                           # 许可证
-├── CONTRIBUTING.md                   # 贡献指南
-└── README.md                         # 项目文档
+zenvis/
+├── deploy/                          # 系统部署目录
+│   ├── docker-compose.yml
+│   ├── config/                      # 各服务配置
+│   ├── data/                        # 数据目录
+│   └── open_config/                 # ZenVis 开放配置
+└── zenvis-backend/
+    ├── src/main/java/com/coolxer/
+    │   ├── Application.java              # 启动类
+    │   ├── aop/                          # 切面处理
+    │   │   ├── AuthorityInterceptor.java # 权限拦截器
+    │   │   ├── LogAopAspect.java         # 日志切面
+    │   │   └── ApiExceptionHandler.java  # 全局异常处理
+    │   ├── commons/                      # 公共模块
+    │   │   ├── constants/                # 常量定义
+    │   │   ├── enums/                    # 枚举类
+    │   │   └── exception/                # 异常类
+    │   ├── component/                    # Spring 组件
+    │   ├── configuration/                # 配置类
+    │   ├── controller/                   # REST API 控制器
+    │   │   ├── dashboard/                # 仪表盘
+    │   │   ├── dih/                      # 深度思考助手
+    │   │   ├── policy/                   # 策略配置
+    │   │   ├── retrieval/                # 检索引擎
+    │   │   └── system/                   # 系统管理
+    │   ├── dao/                          # 数据访问层
+    │   │   ├── clickhouse/               # ClickHouse 实体和仓库
+    │   │   └── mysql/                    # MySQL 实体和仓库
+    │   ├── model/                        # 数据模型
+    │   ├── service/                      # 业务服务层
+    │   └── utils/                        # 工具类
+    ├── src/main/resources/               # 资源文件
+    ├── AGENTS.md                         # AI Agent 架构与开发边界
+    ├── Dockerfile                        # Docker 配置
+    ├── build.sh                          # 构建脚本
+    ├── LICENSE                           # 许可证
+    ├── CONTRIBUTING.md                   # 贡献指南
+    └── README.md                         # 项目文档
 ```
 
 ***
@@ -343,7 +343,7 @@ zenvis-backend/
 | 用户管理  | `UserController`      | 用户信息管理、认证授权 |
 | 角色管理  | `RoleController`      | 角色定义、权限分配   |
 | 菜单管理  | `MenuController`      | 菜单配置、权限控制   |
-| 插件管理  | `PluginController`    | 插件安装、启用、禁用  |
+| 插件管理  | `PluginController`    | 插件上传、安装、升级、恢复与卸载  |
 | 推送任务  | `PushTaskController`  | 定时推送任务管理    |
 | 仪表盘配置 | `DashboardController` | 仪表盘配置管理     |
 
@@ -385,7 +385,7 @@ zenvis-backend/
 
 启动服务后访问 Swagger UI：
 
-- <http://localhost:11001/swagger-ui/>
+- <http://localhost:11001/swagger-ui/index.html>
 
 ***
 
@@ -399,7 +399,7 @@ zenvis-backend/
 | AI 赋能   | 集成大语言模型，支持自然语言查询                 |
 | 可视化引擎   | 内置 ECharts，丰富的图表展示能力             |
 | 企业级 API | RESTful API 设计，易于集成到业务系统         |
-| 一键部署    | Docker / docker-compose 快速部署     |
+| 一键部署    | Docker / Docker Compose 快速部署     |
 
 ***
 

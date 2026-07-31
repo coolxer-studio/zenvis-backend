@@ -11,6 +11,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ChatMessagePartParserTest {
 
@@ -208,97 +209,21 @@ class ChatMessagePartParserTest {
     }
 
     @Test
-    @DisplayName("处置策略配置围栏应解析为配置片段")
-    void parseDisposalStrategyConfigFence() {
+    @DisplayName("配置记录围栏应解析为配置记录片段")
+    void parseConfigRecordFence() {
         String content = """
-                ```zenvis:disposal-strategy-config
-                {"disposalObject":{},"disposalMethod":{}}
+                ```zenvis:config-record
+                {"recordId":"config-001","changeDescription":"调整系统信息展示配置","changeMode":"modify","configType":"system","fileName":"system-info.json","format":"json","validationStatus":"unverified","effectiveStatus":"no"}
                 ```
                 """;
 
         List<ChatMessagePart> parts = parser.parse(content, MessageType.TEXT);
 
         assertEquals(1, parts.size());
-        assertEquals("config", parts.get(0).getType());
-        assertEquals("处置策略配置", parts.get(0).getTitle());
-        assertEquals("json", parts.get(0).getLanguage());
-        assertEquals("disposal-strategy", parts.get(0).getMetadata().get("configKind"));
-        assertEquals("analysis-disposal-strategy.json", parts.get(0).getMetadata().get("defaultFileName"));
-    }
-
-    @Test
-    @DisplayName("采集策略配置围栏应解析为配置片段")
-    void parseCollectionPolicyConfigFence() {
-        String content = """
-                ```zenvis:collection-policy-config
-                {"runtimeConfig":{"process":["frpc"]}}
-                ```
-                """;
-
-        List<ChatMessagePart> parts = parser.parse(content, MessageType.TEXT);
-
-        assertEquals(1, parts.size());
-        assertEquals("config", parts.get(0).getType());
-        assertEquals("采集策略配置", parts.get(0).getTitle());
-        assertEquals("json", parts.get(0).getLanguage());
-        assertEquals("collection-policy", parts.get(0).getMetadata().get("configKind"));
-        assertEquals("checker_config/{host|android|ios|h5|wechat}.json", parts.get(0).getMetadata().get("defaultFileName"));
-    }
-
-    @Test
-    @DisplayName("标记评分策略配置围栏应解析为配置片段")
-    void parseTaggingPolicyConfigFence() {
-        String content = """
-                ```zenvis:tagging-policy-config
-                [{"name":"高危评分","score_rules":[]}]
-                ```
-                """;
-
-        List<ChatMessagePart> parts = parser.parse(content, MessageType.TEXT);
-
-        assertEquals(1, parts.size());
-        assertEquals("config", parts.get(0).getType());
-        assertEquals("标记评分策略配置", parts.get(0).getTitle());
-        assertEquals("json", parts.get(0).getLanguage());
-        assertEquals("tagging-policy", parts.get(0).getMetadata().get("configKind"));
-        assertEquals("rating_config/rating_rule.json", parts.get(0).getMetadata().get("defaultFileName"));
-    }
-
-    @Test
-    @DisplayName("生产处置策略配置围栏应解析为配置片段")
-    void parseDisposalPolicyConfigFence() {
-        String content = """
-                ```zenvis:disposal-policy-config
-                [{"tag":"webshell","sourceRegex":".*","action":{"type":1,"title":"阻断","message":"阻断风险源"}}]
-                ```
-                """;
-
-        List<ChatMessagePart> parts = parser.parse(content, MessageType.TEXT);
-
-        assertEquals(1, parts.size());
-        assertEquals("config", parts.get(0).getType());
-        assertEquals("处置策略配置", parts.get(0).getTitle());
-        assertEquals("json", parts.get(0).getLanguage());
-        assertEquals("disposal-policy", parts.get(0).getMetadata().get("configKind"));
-        assertEquals("punish_config/<stable-name>.json", parts.get(0).getMetadata().get("defaultFileName"));
-    }
-
-    @Test
-    @DisplayName("策略记录围栏应解析为策略记录片段")
-    void parsePolicyRecordFence() {
-        String content = """
-                ```zenvis:policy-record
-                {"recordId":"policy-001","policyType":"disposal","changeDescription":"新增处置策略","validationStatus":"unverified","effectiveStatus":"no"}
-                ```
-                """;
-
-        List<ChatMessagePart> parts = parser.parse(content, MessageType.TEXT);
-
-        assertEquals(1, parts.size());
-        assertEquals("policy-record", parts.get(0).getType());
-        assertEquals("新增处置策略", parts.get(0).getContent());
-        assertEquals("policy-001", parts.get(0).getMetadata().get("recordId"));
-        assertEquals("disposal", parts.get(0).getMetadata().get("policyType"));
+        assertEquals("config-record", parts.get(0).getType());
+        assertEquals("调整系统信息展示配置", parts.get(0).getContent());
+        assertEquals("config-001", parts.get(0).getMetadata().get("recordId"));
+        assertEquals("system", parts.get(0).getMetadata().get("configType"));
     }
 
     @Test
@@ -306,7 +231,7 @@ class ChatMessagePartParserTest {
     void parseReportDocumentConfigFence() {
         String content = """
                 ```zenvis:report-document-config
-                # 巡检研判报告
+                # 数据分析报告
 
                 ## 摘要
 
@@ -318,11 +243,11 @@ class ChatMessagePartParserTest {
 
         assertEquals(1, parts.size());
         assertEquals("report-document", parts.get(0).getType());
-        assertEquals("巡检研判报告", parts.get(0).getTitle());
+        assertEquals("数据分析报告", parts.get(0).getTitle());
         assertEquals("markdown", parts.get(0).getLanguage());
         assertEquals("report-document", parts.get(0).getMetadata().get("configKind"));
         assertEquals("report.md", parts.get(0).getMetadata().get("defaultFileName"));
-        assertEquals("巡检研判报告", parts.get(0).getMetadata().get("title"));
+        assertEquals("数据分析报告", parts.get(0).getMetadata().get("title"));
         assertNotNull(parts.get(0).getMetadata().get("updatedAt"));
         assertFalse(((List<?>) parts.get(0).getMetadata().get("outline")).isEmpty());
     }
@@ -381,42 +306,22 @@ class ChatMessagePartParserTest {
     }
 
     @Test
-    @DisplayName("研判后续选择围栏应解析为待选择片段")
-    void parseAnalysisDecisionFence() {
+    @DisplayName("数据分析阶段记录围栏应解析为记录片段")
+    void parseDataAnalysisRecordFence() {
         String content = """
-                ```zenvis:analysis-decision
-                {"title":"研判完成，请选择后续处理","content":"可以执行处置、忽略告警，或补充研判重点继续分析。","actions":["dispose","ignore","continue"]}
+                ```zenvis:data-analysis-record
+                {"recordId":"analysis-dataset-001","stage":"dataset_preparation","status":"completed","title":"数据集准备完成","content":"已关联用户事件数据。","analysisTarget":"分析近七天上报量与失败率异常波动","datasetSummary":"按应用和日期聚合","datasetRecords":[{"date":"2026-07-27","count":120,"failureRate":0.02}]}
                 ```
                 """;
 
         List<ChatMessagePart> parts = parser.parse(content, MessageType.TEXT);
 
         assertEquals(1, parts.size());
-        assertEquals("analysis-decision", parts.get(0).getType());
-        assertEquals("研判完成，请选择后续处理", parts.get(0).getTitle());
-        assertEquals("可以执行处置、忽略告警，或补充研判重点继续分析。", parts.get(0).getContent());
-        assertEquals("pending", parts.get(0).getStatus());
-        assertEquals(List.of("dispose", "ignore", "continue"), parts.get(0).getMetadata().get("actions"));
-    }
-
-    @Test
-    @DisplayName("研判阶段记录围栏应解析为记录片段")
-    void parseAnalysisRecordFence() {
-        String content = """
-                ```zenvis:analysis-record
-                {"recordId":"analysis-log-001","stage":"log_aggregation","status":"completed","title":"日志聚合完成","content":"已关联 12 条告警日志。","evidenceCount":12,"riskLevel":"高危","confidence":0.86,"toolNames":["retrieval_search"]}
-                ```
-                """;
-
-        List<ChatMessagePart> parts = parser.parse(content, MessageType.TEXT);
-
-        assertEquals(1, parts.size());
-        assertEquals("analysis-record", parts.get(0).getType());
-        assertEquals("日志聚合完成", parts.get(0).getTitle());
-        assertEquals("已关联 12 条告警日志。", parts.get(0).getContent());
-        assertEquals("log_aggregation", parts.get(0).getMetadata().get("stage"));
-        assertEquals(12, parts.get(0).getMetadata().get("evidenceCount"));
-        assertEquals("高危", parts.get(0).getMetadata().get("riskLevel"));
+        assertEquals("data-analysis-record", parts.get(0).getType());
+        assertEquals("数据集准备完成", parts.get(0).getTitle());
+        assertEquals("已关联用户事件数据。", parts.get(0).getContent());
+        assertEquals("dataset_preparation", parts.get(0).getMetadata().get("stage"));
+        assertEquals("分析近七天上报量与失败率异常波动", parts.get(0).getMetadata().get("analysisTarget"));
     }
 
     @Test
@@ -503,11 +408,39 @@ class ChatMessagePartParserTest {
     }
 
     @Test
+    @DisplayName("数据推送失败、日志和原因围栏应解析为三张独立提示卡")
+    void parsePushTaskDiagnosticNoticeCards() {
+        String content = """
+                ```zenvis:notice
+                {"title":"数据推送任务运行失败（第 1/5 轮）","content":"任务 ID：12\\nsourceMark：data-access:chat:service-log\\n状态：error\\n失败阶段：运行检查","level":"error"}
+                ```
+                ```zenvis:notice
+                {"title":"数据推送任务日志（第 1/5 轮）","content":"日志类型：system\\n最新相关日志：unknown field","level":"warning"}
+                ```
+                ```zenvis:notice
+                {"title":"失败原因与配置修改（第 1/5 轮）","content":"分类：配置错误\\n日志证据：unknown field codec\\n失败原因：codec 字段值无效\\n修改内容：\\n1. 配置路径：sinks.out.encoding.codec；旧值：text；新值：json；依据：unknown field codec\\n下一步：修复并重启","level":"warning"}
+                ```
+                """;
+
+        List<ChatMessagePart> parts = parser.parse(content, MessageType.TEXT);
+
+        assertEquals(3, parts.size());
+        assertEquals(List.of("notice", "notice", "notice"),
+                parts.stream().map(ChatMessagePart::getType).toList());
+        assertEquals("数据推送任务运行失败（第 1/5 轮）", parts.get(0).getTitle());
+        assertEquals("error", parts.get(0).getLevel());
+        assertEquals("数据推送任务日志（第 1/5 轮）", parts.get(1).getTitle());
+        assertEquals("失败原因与配置修改（第 1/5 轮）", parts.get(2).getTitle());
+        assertTrue(parts.get(2).getContent().contains("失败原因：codec 字段值无效"));
+        assertTrue(parts.get(2).getContent().contains("旧值：text；新值：json"));
+    }
+
+    @Test
     @DisplayName("MCP 审批围栏应保留请求标识和最终状态")
     void parseMcpApprovalFence() {
         String content = """
                 ```zenvis:mcp-approval
-                {"id":"request-1","title":"MCP 工具审批：delete","content":"删除记录","status":"succeeded","toolKey":"local::delete","approvalScope":"SESSION","argumentsSummary":"{\\"id\\":1}"}
+                {"id":"request-1","title":"MCP 工具审批：delete","content":"删除记录","status":"succeeded","toolKey":"local::delete","approvalScope":"SESSION","arguments":"{\\"id\\":1}","resultLength":11}
                 ```
                 """;
 
@@ -519,6 +452,8 @@ class ChatMessagePartParserTest {
         assertEquals("succeeded", parts.get(0).getStatus());
         assertEquals("local::delete", parts.get(0).getMetadata().get("toolKey"));
         assertEquals("SESSION", parts.get(0).getMetadata().get("approvalScope"));
+        assertEquals("{\"id\":1}", parts.get(0).getMetadata().get("arguments"));
+        assertEquals(11, parts.get(0).getMetadata().get("resultLength"));
     }
 
     @Test

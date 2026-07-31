@@ -1,15 +1,35 @@
 package com.coolxer.service.system.impl;
 
 import com.coolxer.commons.enums.DashboardType;
+import com.coolxer.commons.enums.MenuLevel;
+import com.coolxer.commons.enums.MenuType;
+import com.coolxer.commons.enums.PluginStatusType;
 import com.coolxer.commons.exception.ApiException;
 import com.coolxer.configuration.CustomWebConfig;
 import com.coolxer.dao.mysql.entity.Dashboard;
+import com.coolxer.dao.mysql.entity.Menu;
 import com.coolxer.model.system.dto.DashboardDto;
+import com.coolxer.model.system.dto.MenuDto;
+import com.coolxer.model.retrieval.meta.DataAttribute;
+import com.coolxer.model.retrieval.meta.DataEntity;
+import com.coolxer.model.retrieval.meta.MetaData;
+import com.coolxer.dao.mysql.entity.Plugin;
+import com.coolxer.dao.mysql.repository.DashboardRepository;
+import com.coolxer.dao.mysql.repository.MenuRepository;
+import com.coolxer.dao.mysql.repository.McpServerConfigRepository;
+import com.coolxer.dao.mysql.repository.PluginRepository;
+import com.coolxer.dao.mysql.repository.RolePermissionRepository;
+import com.coolxer.service.dih.agent.skill.SkillService;
+import com.coolxer.service.dih.rag.VectorStoreInitializerService;
+import com.coolxer.service.system.MenuService;
+import com.coolxer.service.system.PushTaskService;
+import com.coolxer.model.system.vo.PluginVo;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -20,9 +40,19 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class PluginServiceImplTest {
 
@@ -322,6 +352,369 @@ class PluginServiceImplTest {
         assertThat(second).doesNotExist();
     }
 
+    @Test
+    void additiveMetaUpgradeAllowsNewFieldsAndEntities() {
+        PluginServiceImpl service = newService();
+        MetaData current = metaData(entity(1, "event", "zenvis.event"),
+                attribute(1, "event", "event_id", "event_id", "String"));
+        MetaData candidate = metaData(
+                List.of(entity(1, "event", "zenvis.event"), entity(2, "asset", "zenvis.asset")),
+                List.of(
+                        attribute(1, "event", "event_id", "event_id", "String"),
+                        attribute(2, "event", "severity", "severity", "UInt8"),
+                        attribute(3, "asset", "asset_id", "asset_id", "String")
+                ));
+
+        assertThatCode(() -> ReflectionTestUtils.invokeMethod(
+                service, "validateAdditiveMetaChange", current, candidate)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void additiveMetaUpgradeRejectsDeletionRenameAndTypeChanges() {
+        PluginServiceImpl service = newService();
+        MetaData current = metaData(entity(1, "event", "zenvis.event"),
+                attribute(1, "event", "event_id", "event_id", "String"));
+        MetaData deleted = metaData(new ArrayList<>(), new ArrayList<>());
+        MetaData renamedTable = metaData(entity(1, "event", "zenvis.event_v2"),
+                attribute(1, "event", "event_id", "event_id", "String"));
+        MetaData changedType = metaData(entity(1, "event", "zenvis.event"),
+                attribute(1, "event", "event_id", "event_id", "UInt64"));
+
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(
+                service, "validateAdditiveMetaChange", current, deleted))
+                .isInstanceOf(ApiException.class).hasMessageContaining("删除或重命名实体");
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(
+                service, "validateAdditiveMetaChange", current, renamedTable))
+                .isInstanceOf(ApiException.class).hasMessageContaining("表名");
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(
+                service, "validateAdditiveMetaChange", current, changedType))
+                .isInstanceOf(ApiException.class).hasMessageContaining("字段类型");
+    }
+
+    @Test
+    void upgradeSnapshotIsPersistedAndReadableAfterRestart() throws Exception {
+        PluginServiceImpl service = newService();
+        MenuService menuService = mock(MenuService.class);
+        DashboardRepository dashboardRepository = mock(DashboardRepository.class);
+        McpServerConfigRepository mcpRepository = mock(McpServerConfigRepository.class);
+        PushTaskService pushTaskService = mock(PushTaskService.class);
+        SkillService skillService = mock(SkillService.class);
+        ReflectionTestUtils.setField(service, "menuService", menuService);
+        ReflectionTestUtils.setField(service, "dashboardRepository", dashboardRepository);
+        ReflectionTestUtils.setField(service, "mcpServerConfigRepository", mcpRepository);
+        ReflectionTestUtils.setField(service, "pushTaskService", pushTaskService);
+        ReflectionTestUtils.setField(service, "skillService", skillService);
+
+        String packageName = "com.acme.snapshot";
+        Plugin plugin = new Plugin();
+        plugin.setId(7);
+        plugin.setName("Snapshot");
+        plugin.setPackageName(packageName);
+        plugin.setVersion("1.0.0");
+        plugin.setPluginPath(pluginRoot.resolve("snapshot.tar.gz").toString());
+        plugin.setUpgradeOperationId("operation-1");
+        Path installed = pluginRoot.resolve(packageName);
+        Files.createDirectories(installed);
+        Files.writeString(installed.resolve("index.json"), "{}");
+        when(menuService.findBySource(packageName)).thenReturn(List.of());
+        when(dashboardRepository.findBySource(packageName)).thenReturn(List.of());
+        when(mcpRepository.findBySource(packageName)).thenReturn(List.of());
+        when(pushTaskService.findBySourceMark(packageName)).thenReturn(List.of());
+        when(skillService.getInstalledPluginSkillPath(packageName))
+                .thenReturn(pluginRoot.resolve("no-installed-skill"));
+
+        ReflectionTestUtils.invokeMethod(service, "createUpgradeSnapshot", plugin, "operation-1");
+
+        assertThatCode(() -> ReflectionTestUtils.invokeMethod(service, "readUpgradeSnapshot", plugin))
+                .doesNotThrowAnyException();
+        assertThat(pluginRoot.resolve("upgrade/7/operation-1/snapshot/snapshot.json")).isRegularFile();
+        assertThat(pluginRoot.resolve("upgrade/7/operation-1/snapshot/installed/index.json")).exists();
+    }
+
+    @Test
+    void upgradeMenuPreservesExistingPlacementWhileUpdatingPluginDefinition() {
+        PluginServiceImpl service = newService();
+        MenuService menuService = mock(MenuService.class);
+        MenuRepository menuRepository = mock(MenuRepository.class);
+        RolePermissionRepository rolePermissionRepository = mock(RolePermissionRepository.class);
+        ReflectionTestUtils.setField(service, "menuService", menuService);
+        ReflectionTestUtils.setField(service, "menuRepository", menuRepository);
+        ReflectionTestUtils.setField(service, "rolePermissionRepository", rolePermissionRepository);
+
+        String packageName = "com.acme.demo";
+        Menu existing = new Menu()
+                .setName("旧菜单名称")
+                .setType(MenuType.LOW_CODE_APP)
+                .setRoute(MenuType.LOW_CODE_APP.getRoute())
+                .setParams("com.acme.demo.app")
+                .setParentId(91)
+                .setOrderNumber(4)
+                .setLevel(MenuLevel.LEVEL_2)
+                .setSuperscript("旧角标")
+                .setSource(packageName);
+        existing.setId(10);
+        when(menuService.findBySource(packageName)).thenReturn(List.of(existing));
+
+        MenuDto definition = new MenuDto();
+        definition.setName("新菜单名称");
+        definition.setType(MenuType.LOW_CODE_APP);
+        definition.setParams("com.acme.demo.app");
+        definition.setSuperscript("新角标");
+
+        ReflectionTestUtils.invokeMethod(
+                service, "reconcilePluginMenus", packageName, List.of(definition));
+
+        assertThat(existing.getId()).isEqualTo(10);
+        assertThat(existing.getName()).isEqualTo("新菜单名称");
+        assertThat(existing.getType()).isEqualTo(MenuType.LOW_CODE_APP);
+        assertThat(existing.getRoute()).isEqualTo(MenuType.LOW_CODE_APP.getRoute());
+        assertThat(existing.getParams()).isEqualTo("com.acme.demo.app");
+        assertThat(existing.getSuperscript()).isEqualTo("新角标");
+        assertThat(existing.getSource()).isEqualTo(packageName);
+        assertThat(existing.getLevel()).isEqualTo(MenuLevel.LEVEL_2);
+        assertThat(existing.getParentId()).isEqualTo(91);
+        assertThat(existing.getOrderNumber()).isEqualTo(4);
+        verify(menuRepository).save(existing);
+        verify(menuService, never()).create(any(MenuDto.class));
+        verify(rolePermissionRepository, never()).findByPermissionId(any());
+        verify(menuRepository, never()).deleteById(any());
+    }
+
+    @Test
+    void upgradeMenusKeepsRootPlacementCreatesNewMenuAtRootAndDeletesObsoleteMenu() {
+        PluginServiceImpl service = newService();
+        MenuService menuService = mock(MenuService.class);
+        MenuRepository menuRepository = mock(MenuRepository.class);
+        RolePermissionRepository rolePermissionRepository = mock(RolePermissionRepository.class);
+        ReflectionTestUtils.setField(service, "menuService", menuService);
+        ReflectionTestUtils.setField(service, "menuRepository", menuRepository);
+        ReflectionTestUtils.setField(service, "rolePermissionRepository", rolePermissionRepository);
+
+        String packageName = "com.acme.demo";
+        Menu retained = new Menu()
+                .setName("保留菜单")
+                .setType(MenuType.LOW_CODE_PAGE)
+                .setRoute(MenuType.LOW_CODE_PAGE.getRoute())
+                .setParams("com.acme.demo.retained")
+                .setParentId(0)
+                .setOrderNumber(2)
+                .setLevel(MenuLevel.LEVEL_1)
+                .setSource(packageName);
+        retained.setId(20);
+        Menu obsolete = new Menu()
+                .setName("废弃菜单")
+                .setType(MenuType.LOW_CODE_PAGE)
+                .setRoute(MenuType.LOW_CODE_PAGE.getRoute())
+                .setParams("com.acme.demo.obsolete")
+                .setParentId(0)
+                .setOrderNumber(3)
+                .setLevel(MenuLevel.LEVEL_1)
+                .setSource(packageName);
+        obsolete.setId(21);
+        when(menuService.findBySource(packageName)).thenReturn(List.of(retained, obsolete));
+        when(rolePermissionRepository.findByPermissionId(21)).thenReturn(List.of());
+        when(menuService.create(any(MenuDto.class))).thenAnswer(invocation -> {
+            Menu created = new Menu();
+            created.setId(30);
+            return created;
+        });
+
+        MenuDto retainedDefinition = new MenuDto();
+        retainedDefinition.setName("保留菜单");
+        retainedDefinition.setType(MenuType.LOW_CODE_PAGE);
+        retainedDefinition.setParams("com.acme.demo.retained");
+        MenuDto newDefinition = new MenuDto();
+        newDefinition.setName("新增菜单");
+        newDefinition.setType(MenuType.LOW_CODE_PAGE);
+        newDefinition.setParams("com.acme.demo.new");
+
+        ReflectionTestUtils.invokeMethod(
+                service,
+                "reconcilePluginMenus",
+                packageName,
+                List.of(retainedDefinition, newDefinition)
+        );
+
+        assertThat(retained.getLevel()).isEqualTo(MenuLevel.LEVEL_1);
+        assertThat(retained.getParentId()).isZero();
+        assertThat(retained.getOrderNumber()).isEqualTo(2);
+        verify(menuRepository).save(retained);
+
+        ArgumentCaptor<MenuDto> createdMenuCaptor = ArgumentCaptor.forClass(MenuDto.class);
+        verify(menuService).create(createdMenuCaptor.capture());
+        assertThat(createdMenuCaptor.getValue().getName()).isEqualTo("新增菜单");
+        assertThat(createdMenuCaptor.getValue().getLevel()).isEqualTo(MenuLevel.LEVEL_1);
+        assertThat(createdMenuCaptor.getValue().getParentId()).isZero();
+        assertThat(createdMenuCaptor.getValue().getSource()).isEqualTo(packageName);
+
+        verify(rolePermissionRepository).findByPermissionId(21);
+        verify(menuRepository).deleteById(21);
+        verify(menuRepository, never()).deleteById(20);
+        verify(menuRepository, never()).deleteById(30);
+    }
+
+    @Test
+    void upgradeIdentityRequiresSamePackageAndStrictlyHigherSemVer() {
+        PluginServiceImpl service = newService();
+        Plugin current = new Plugin();
+        current.setPackageName("com.acme.demo");
+        current.setVersion("1.2.3");
+
+        PluginVo higher = new PluginVo();
+        higher.setPackageName("com.acme.demo");
+        higher.setVersion("1.2.4");
+        assertThatCode(() -> ReflectionTestUtils.invokeMethod(
+                service, "validateUpgradeIdentity", current, higher)).doesNotThrowAnyException();
+
+        for (String invalidVersion : List.of("1.2.3", "1.2.2", "v2", "1.02.4")) {
+            PluginVo candidate = new PluginVo();
+            candidate.setPackageName("com.acme.demo");
+            candidate.setVersion(invalidVersion);
+            assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(
+                    service, "validateUpgradeIdentity", current, candidate))
+                    .isInstanceOf(ApiException.class);
+        }
+
+        PluginVo wrongPackage = new PluginVo();
+        wrongPackage.setPackageName("com.acme.other");
+        wrongPackage.setVersion("2.0.0");
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(
+                service, "validateUpgradeIdentity", current, wrongPackage))
+                .isInstanceOf(ApiException.class).hasMessageContaining("包名");
+    }
+
+    @Test
+    void installContinuesWhenEmbeddingOrRagServiceIsUnavailable() {
+        PluginServiceImpl service = newService();
+        Runnable ragAction = mock(Runnable.class);
+        doThrow(new RuntimeException("HTTP 502")).when(ragAction).run();
+
+        Boolean succeeded = ReflectionTestUtils.invokeMethod(
+                service,
+                "runPluginRagAction",
+                41L,
+                "com.acme.demo",
+                "加载RAG文档",
+                "安装",
+                ragAction
+        );
+
+        assertThat(succeeded).isFalse();
+        assertThat(service.getLogs(41L)).contains("跳过RAG，继续安装");
+    }
+
+    @Test
+    void upgradeSkipsRemainingRagWorkWhenOldRagCannotBeUnloaded() {
+        PluginServiceImpl service = newService();
+        VectorStoreInitializerService vectorStoreInitializerService = mock(VectorStoreInitializerService.class);
+        ReflectionTestUtils.setField(service, "vectorStoreInitializerService", vectorStoreInitializerService);
+        when(vectorStoreInitializerService.isRagAvailable()).thenReturn(true);
+        doThrow(new RuntimeException("HTTP 502"))
+                .when(vectorStoreInitializerService)
+                .unloadDocFromRag("com_acme_demo");
+        List<String> warnings = new ArrayList<>();
+
+        assertThatCode(() -> ReflectionTestUtils.invokeMethod(
+                service,
+                "updatePluginRag",
+                42L,
+                "com.acme.demo",
+                pluginRoot.resolve("old-doc"),
+                pluginRoot.resolve("new-doc"),
+                warnings
+        )).doesNotThrowAnyException();
+
+        assertThat(warnings).containsExactly("Embedding/RAG服务不可用，已跳过RAG更新");
+        assertThat(service.getLogs(42L)).contains("跳过RAG，继续升级");
+        verify(vectorStoreInitializerService).unloadDocFromRag("com_acme_demo");
+        verify(vectorStoreInitializerService, never()).loadDocToRag(anyString(), any(Path.class));
+    }
+
+    @Test
+    void upgradeContinuesAndRestoresOldRagWhenLoadingNewRagFails() {
+        PluginServiceImpl service = newService();
+        VectorStoreInitializerService vectorStoreInitializerService = mock(VectorStoreInitializerService.class);
+        ReflectionTestUtils.setField(service, "vectorStoreInitializerService", vectorStoreInitializerService);
+        when(vectorStoreInitializerService.isRagAvailable()).thenReturn(true);
+        Path oldDocPath = pluginRoot.resolve("old-doc");
+        Path newDocPath = pluginRoot.resolve("new-doc");
+        doThrow(new RuntimeException("HTTP 502"))
+                .when(vectorStoreInitializerService)
+                .loadDocToRag("com_acme_demo", newDocPath);
+        List<String> warnings = new ArrayList<>();
+
+        assertThatCode(() -> ReflectionTestUtils.invokeMethod(
+                service,
+                "updatePluginRag",
+                43L,
+                "com.acme.demo",
+                oldDocPath,
+                newDocPath,
+                warnings
+        )).doesNotThrowAnyException();
+
+        assertThat(warnings).containsExactly("Embedding/RAG服务不可用，已跳过RAG更新");
+        verify(vectorStoreInitializerService).loadDocToRag("com_acme_demo", newDocPath);
+        verify(vectorStoreInitializerService).loadDocToRag("com_acme_demo", oldDocPath);
+    }
+
+    @Test
+    void upgradeSkipsRagBeforeSpringAiRetryWhenHealthCheckFails() {
+        PluginServiceImpl service = newService();
+        VectorStoreInitializerService vectorStoreInitializerService = mock(VectorStoreInitializerService.class);
+        ReflectionTestUtils.setField(service, "vectorStoreInitializerService", vectorStoreInitializerService);
+        when(vectorStoreInitializerService.isRagAvailable()).thenReturn(false);
+        List<String> warnings = new ArrayList<>();
+
+        assertThatCode(() -> ReflectionTestUtils.invokeMethod(
+                service,
+                "updatePluginRag",
+                44L,
+                "com.acme.demo",
+                pluginRoot.resolve("old-doc"),
+                pluginRoot.resolve("new-doc"),
+                warnings
+        )).doesNotThrowAnyException();
+
+        assertThat(warnings).containsExactly("Embedding/RAG服务不可用，已跳过RAG更新");
+        assertThat(service.getLogs(44L)).contains("跳过RAG，继续升级");
+        verify(vectorStoreInitializerService, never()).unloadDocFromRag(anyString());
+        verify(vectorStoreInitializerService, never()).loadDocToRag(anyString(), any(Path.class));
+    }
+
+    @Test
+    void unexpectedBackgroundFailureSettlesInProgressStatus() {
+        PluginServiceImpl service = newService();
+        PluginOperationExecutor executor = mock(PluginOperationExecutor.class);
+        PluginRepository pluginRepository = mock(PluginRepository.class);
+        Plugin plugin = new Plugin();
+        plugin.setId(45);
+        plugin.setStatus(PluginStatusType.INSTALLING);
+        when(pluginRepository.findById(45L)).thenReturn(Optional.of(plugin));
+        doAnswer(invocation -> {
+            invocation.<Runnable>getArgument(0).run();
+            return null;
+        }).when(executor).submit(any(Runnable.class));
+        ReflectionTestUtils.setField(service, "pluginOperationExecutor", executor);
+        ReflectionTestUtils.setField(service, "pluginRepository", pluginRepository);
+
+        assertThatCode(() -> ReflectionTestUtils.invokeMethod(
+                service,
+                "submitPluginOperation",
+                45L,
+                PluginStatusType.INSTALL_FAILED,
+                "安装",
+                (Runnable) () -> {
+                    throw new RuntimeException("unexpected");
+                }
+        )).doesNotThrowAnyException();
+
+        assertThat(plugin.getStatus()).isEqualTo(PluginStatusType.INSTALL_FAILED);
+        assertThat(plugin.getOperationMessage()).contains("异常中止");
+        assertThat(plugin.getOperationEndedAt()).isNotNull();
+        verify(pluginRepository).save(plugin);
+    }
+
     private PluginServiceImpl newService() {
         CustomWebConfig customWebConfig = new CustomWebConfig();
         ReflectionTestUtils.setField(customWebConfig, "pluginPath", pluginRoot.toString());
@@ -339,6 +732,45 @@ class PluginServiceImplTest {
         dto.setType(DashboardType.LINK);
         dto.setUrl("https://example.com/dashboard");
         return dto;
+    }
+
+    private MetaData metaData(DataEntity entity, DataAttribute attribute) {
+        return metaData(List.of(entity), List.of(attribute));
+    }
+
+    private MetaData metaData(List<DataEntity> entities, List<DataAttribute> attributes) {
+        MetaData metaData = new MetaData();
+        metaData.setEntity(new ArrayList<>(entities));
+        metaData.setAttribute(new ArrayList<>(attributes));
+        return metaData;
+    }
+
+    private DataEntity entity(int id, String name, String tableName) {
+        DataEntity entity = new DataEntity();
+        entity.setId(id);
+        entity.setName(name);
+        entity.setTableName(tableName);
+        entity.setDataSource("clickhouse");
+        DataEntity.DbCreate autoCreate = entity.new DbCreate();
+        autoCreate.setEngine("MergeTree()");
+        autoCreate.setOrderBy(List.of(name + "_id"));
+        autoCreate.setPartitionBy("toYYYYMM(zenvis_insert_time)");
+        entity.setAutoCreate(autoCreate);
+        return entity;
+    }
+
+    private DataAttribute attribute(int id,
+                                    String entity,
+                                    String name,
+                                    String columnName,
+                                    String columnType) {
+        DataAttribute attribute = new DataAttribute();
+        attribute.setId(id);
+        attribute.setEntity(entity);
+        attribute.setName(name);
+        attribute.setColumnName(columnName);
+        attribute.setColumnType(columnType);
+        return attribute;
     }
 
     private MockMultipartFile packageFile(String filename, byte[] bytes) {

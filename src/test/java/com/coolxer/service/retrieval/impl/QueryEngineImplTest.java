@@ -11,6 +11,7 @@ import jakarta.persistence.Query;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.Collections;
@@ -23,9 +24,24 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
 import static org.mockito.ArgumentMatchers.anyString;
 
 class QueryEngineImplTest {
+
+    @Test
+    void readQueriesDoNotOpenUnsupportedClickHouseTransactions() throws NoSuchMethodException {
+        assertThat(QueryEngineImpl.class.getMethod(
+                "countByTimeRange",
+                String.class, String.class, String.class, String.class,
+                Date.class, Date.class, boolean.class).getAnnotation(Transactional.class))
+                .isNull();
+
+        Transactional writeTransaction = QueryEngineImpl.class.getMethod(
+                "save", String.class, List.class, List.class).getAnnotation(Transactional.class);
+        assertThat(writeTransaction).isNotNull();
+        assertThat(writeTransaction.transactionManager()).isEqualTo("clickHouseTransactionManager");
+    }
 
     @Test
     void findByIdUsesValidatedPlatformKeyColumn() {
@@ -102,6 +118,11 @@ class QueryEngineImplTest {
                 new RetrievalPageable(1, 10, "server_time", "asc")
         );
         assertThat(page).isEqualTo(" order by server_time asc limit 0,10");
+        assertThat((String) ReflectionTestUtils.invokeMethod(
+                queryEngine,
+                "buildPage",
+                new RetrievalPageable(1, 100, "server_time", null)
+        )).isEqualTo(" order by server_time desc limit 0,100");
 
         assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(
                 queryEngine,
@@ -116,7 +137,7 @@ class QueryEngineImplTest {
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("分页参数");
         assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(
-                queryEngine, "buildPage", new RetrievalPageable(1, 201, null, null)))
+                queryEngine, "buildPage", new RetrievalPageable(1, 101, null, null)))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("分页参数");
         assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(
@@ -148,6 +169,23 @@ class QueryEngineImplTest {
 
         assertThat(criteriaSql).isEqualTo(
                 "zenvis_insert_time >= toDateTime64('2026-07-15 09:00:00', 3, 'Asia/Shanghai')");
+    }
+
+    @Test
+    void dateRetrievalTypeConvertsEpochMillisecondsForTemporalBetweenCriteria() {
+        QueryEngineImpl queryEngine = new QueryEngineImpl();
+        ReflectionTestUtils.setField(queryEngine, "retrievalTimeZone", "Asia/Shanghai");
+        ColumnCriteria criteria = criteria(
+                "found_time", "DateTime", "between",
+                List.of("1784821799000", "1784822999000"));
+        criteria.setRetrievalType("date");
+
+        String criteriaSql = ReflectionTestUtils.invokeMethod(queryEngine, "buildCriteriaSql", criteria);
+
+        assertThat(criteriaSql).isEqualTo(
+                "found_time between "
+                        + "toDateTime('2026-07-23 23:49:59', 'Asia/Shanghai') and "
+                        + "toDateTime('2026-07-24 00:09:59', 'Asia/Shanghai')");
     }
 
     @Test
@@ -318,4 +356,5 @@ class QueryEngineImplTest {
         expression.setChildren(List.of(children));
         return expression;
     }
+
 }
