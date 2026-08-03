@@ -150,8 +150,7 @@ public class UserServiceImpl implements UserService {
             throw new ApiException(ResultCodeEnum.SUPER_ADMIN_ROLE_ASSIGN_NOT_ALLOWED);
         }
 
-        // 前端传输密码加密时的处理
-        String password = cryptService.decryptByRsaPrivateKey(userDto.getPassword(), RsaUtils.PRI_KY);
+        String password = userDto.getPassword();
 
         // 校验密码格式
         if (passwordCheckFail(password)) {
@@ -185,6 +184,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    @Transactional(transactionManager = "mysqlTransactionManager", rollbackFor = Exception.class)
     public Boolean update(Long id, UserDto userDto) {
         // 必填项校验
         checkCreateOrUpdate(userDto);
@@ -195,19 +195,20 @@ public class UserServiceImpl implements UserService {
             if (SystemBuiltInConstants.isSuperAdmin(user)) {
                 throw new ApiException(ResultCodeEnum.SUPER_ADMIN_USER_NOT_ALLOWED);
             }
+            Role role = roleRepository.findById(userDto.getRoleId());
+            if (SystemBuiltInConstants.isSuperAdmin(role)) {
+                throw new ApiException(ResultCodeEnum.SUPER_ADMIN_ROLE_ASSIGN_NOT_ALLOWED);
+            }
 
             // 修改邮箱，校验邮箱，系统唯一
             User existUser = userRepository.findByEmail(userDto.getEmail());
-            if (Objects.nonNull(existUser) && !existUser.getId().equals(userDto.getId())) {
+            if (Objects.nonNull(existUser) && !Objects.equals(existUser.getId(), user.getId())) {
                 throw new ApiException(ResultCodeEnum.EMAIL_IS_EXIST);
             }
 
             // 如果修改密码
             String newPassword = userDto.getPassword();
             if (StringUtils.isNotEmpty(newPassword)) {
-                // 解密
-                newPassword = cryptService.decryptByRsaPrivateKey(newPassword, RsaUtils.PRI_KY);
-
                 // 校验密码格式
                 if (passwordCheckFail(newPassword)) {
                     throw new ApiException(ResultCodeEnum.ERROR_PASSWORD_FORMAT);
@@ -226,6 +227,13 @@ public class UserServiceImpl implements UserService {
             user.setName(userDto.getName());
 
             userRepository.save(user);
+            UserRole userRole = userRoleRepository.findByUserId(user.getId());
+            if (Objects.isNull(userRole)) {
+                userRole = new UserRole();
+                userRole.setUserId(user.getId());
+            }
+            userRole.setRoleId(userDto.getRoleId());
+            userRoleRepository.save(userRole);
             return true;
         } else {
             throw new ApiException(ResultCodeEnum.ERROR_USER_IS_NOT_EXIST);
@@ -331,22 +339,22 @@ public class UserServiceImpl implements UserService {
      * 密码格式检查，密码至少包含数字 大写字母 小写字母 特殊字符中的两种，且长度在8-32位之间.
      */
     private boolean passwordCheckFail(String strPassword) {
-        int num = 0;
-        if (strPassword != null && !strPassword.isEmpty()) {
-            //数字匹配
-            num = numRegEx.matcher(strPassword.trim()).find() ? num + 1 : num;
-            //小写字母匹配
-            num = lowerRegEx.matcher(strPassword.trim()).find() ? num + 1 : num;
-            //大写字母匹配
-            num = upperRegEx.matcher(strPassword.trim()).find() ? num + 1 : num;
-            //特殊字符匹配
-            num = specialRegEx.matcher(strPassword.trim()).find() ? num + 1 : num;
-            if (num < MATCHER_TIMES || strPassword.trim().length() < PASSWORD_MIN_LENGTH_LIMIT
-                    || strPassword.trim().length() > PASSWORD_MAX_LENGTH_LIMIT) {
-                return true;
-            }
+        if (StringUtils.isBlank(strPassword)) {
+            return true;
         }
-        return false;
+
+        String password = strPassword.trim();
+        int num = 0;
+        //数字匹配
+        num = numRegEx.matcher(password).find() ? num + 1 : num;
+        //小写字母匹配
+        num = lowerRegEx.matcher(password).find() ? num + 1 : num;
+        //大写字母匹配
+        num = upperRegEx.matcher(password).find() ? num + 1 : num;
+        //特殊字符匹配
+        num = specialRegEx.matcher(password).find() ? num + 1 : num;
+        return num < MATCHER_TIMES || password.length() < PASSWORD_MIN_LENGTH_LIMIT
+                || password.length() > PASSWORD_MAX_LENGTH_LIMIT;
     }
 
 }

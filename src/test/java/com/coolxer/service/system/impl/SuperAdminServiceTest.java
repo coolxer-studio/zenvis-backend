@@ -339,6 +339,105 @@ class SuperAdminServiceTest {
     }
 
     @Test
+    void updatingUserCanKeepOwnEmailWhenRequestBodyOmitsId() {
+        User existingUser = user(7, "user@admin.com", false);
+        existingUser.setPassword("hashed-password");
+        when(userRepository.findById(7L)).thenReturn(Optional.of(existingUser));
+        when(userRepository.findByEmail("user@admin.com")).thenReturn(existingUser);
+
+        UserDto dto = new UserDto();
+        dto.setEmail("user@admin.com");
+        dto.setName("updated-name");
+        dto.setRoleId(2);
+
+        assertThat(userService.update(7L, dto)).isTrue();
+        verify(userRepository).save(existingUser);
+    }
+
+    @Test
+    void updatingUserChangesRoleAssociation() {
+        User existingUser = user(7, "user@admin.com", false);
+        UserRole userRole = new UserRole();
+        userRole.setUserId(7);
+        userRole.setRoleId(2);
+        when(userRepository.findById(7L)).thenReturn(Optional.of(existingUser));
+        when(userRepository.findByEmail("user@admin.com")).thenReturn(existingUser);
+        when(userRoleRepository.findByUserId(7)).thenReturn(userRole);
+
+        UserDto dto = new UserDto();
+        dto.setEmail("user@admin.com");
+        dto.setName("updated-name");
+        dto.setRoleId(3);
+
+        assertThat(userService.update(7L, dto)).isTrue();
+        assertThat(userRole.getRoleId()).isEqualTo(3);
+        verify(userRoleRepository).save(userRole);
+    }
+
+    @Test
+    void updatingUserRejectsEmailOwnedByAnotherUser() {
+        User updatedUser = user(7, "user@admin.com", false);
+        User emailOwner = user(8, "other@admin.com", false);
+        when(userRepository.findById(7L)).thenReturn(Optional.of(updatedUser));
+        when(userRepository.findByEmail("other@admin.com")).thenReturn(emailOwner);
+
+        UserDto dto = new UserDto();
+        dto.setEmail("other@admin.com");
+        dto.setName("updated-name");
+        dto.setRoleId(2);
+
+        assertThatThrownBy(() -> userService.update(7L, dto))
+                .isInstanceOf(ApiException.class)
+                .extracting("code")
+                .isEqualTo(ResultCodeEnum.EMAIL_IS_EXIST.getCode());
+        verify(userRepository, never()).save(updatedUser);
+    }
+
+    @Test
+    void creatingUserHashesPlaintextPasswordSubmittedByUserManagement() {
+        Role normalRole = role(2, "机构管理员", false);
+        when(userRepository.findByEmail("new-user@admin.com")).thenReturn(null);
+        when(roleRepository.findById(2)).thenReturn(normalRole);
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
+            User user = invocation.getArgument(0);
+            user.setId(9);
+            return user;
+        });
+
+        UserDto dto = new UserDto();
+        dto.setEmail("new-user@admin.com");
+        dto.setName("new-user");
+        dto.setPassword("Admin@123");
+        dto.setRoleId(2);
+
+        userService.create(dto);
+
+        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(userCaptor.capture());
+        assertThat(BCrypt.checkpw("Admin@123", userCaptor.getValue().getPassword())).isTrue();
+        verify(cryptService, never()).decryptByRsaPrivateKey(any(), any());
+    }
+
+    @Test
+    void updatingAffectedUserReplacesEmptyPasswordHashWithSubmittedPassword() {
+        User existingUser = user(7, "user@admin.com", false);
+        existingUser.setPassword(BCrypt.hashpw("", BCrypt.GENSALT_DEFAULT));
+        when(userRepository.findById(7L)).thenReturn(Optional.of(existingUser));
+        when(userRepository.findByEmail("user@admin.com")).thenReturn(existingUser);
+
+        UserDto dto = new UserDto();
+        dto.setEmail("user@admin.com");
+        dto.setName("updated-name");
+        dto.setPassword("NewAdmin@123");
+        dto.setRoleId(2);
+
+        assertThat(userService.update(7L, dto)).isTrue();
+        assertThat(BCrypt.checkpw("NewAdmin@123", existingUser.getPassword())).isTrue();
+        assertThat(BCrypt.checkpw("", existingUser.getPassword())).isFalse();
+        verify(cryptService, never()).decryptByRsaPrivateKey(any(), any());
+    }
+
+    @Test
     void cannotAssignSuperAdminRoleWhenCreatingUser() {
         Role superRole = role(9, SystemBuiltInConstants.SUPER_ADMIN_ROLE_NAME, true);
         when(userRepository.findByEmail("normal@admin.com")).thenReturn(null);
