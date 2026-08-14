@@ -22,7 +22,11 @@ import java.util.Set;
 @Accessors(chain = true)
 @NoArgsConstructor
 @EqualsAndHashCode(callSuper = true)
-@Table(name = MysqlFinalTableName.T_AI_ANALYSIS_TASK)
+@Table(name = MysqlFinalTableName.T_AI_ANALYSIS_TASK,
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_analysis_task_schedule_fire",
+                columnNames = {"schedule_id", "schedule_fire_time"}
+        ))
 public class AnalysisTask extends BaseEntity {
 
     /**
@@ -105,6 +109,18 @@ public class AnalysisTask extends BaseEntity {
      */
     @Column(name = "scheduled_time")
     private Date scheduledTime;
+
+    /**
+     * 来源周期配置 ID；手工创建的任务为空。
+     */
+    @Column(name = "schedule_id")
+    private Integer scheduleId;
+
+    /**
+     * 周期配置本次触发时间；手工创建的任务为空。
+     */
+    @Column(name = "schedule_fire_time")
+    private Date scheduleFireTime;
 
     /**
      * 开始执行时间

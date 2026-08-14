@@ -2,7 +2,9 @@ package com.coolxer.service.system.impl;
 
 import com.coolxer.configuration.CustomWebConfig;
 import com.coolxer.configuration.JacksonConfig;
+import com.coolxer.commons.enums.AnalysisTaskStatus;
 import com.coolxer.dao.mysql.entity.AnalysisTask;
+import com.coolxer.dao.mysql.repository.AnalysisTaskRepository;
 import com.coolxer.model.system.vo.AnalysisTaskVo;
 import com.coolxer.service.dih.AIBaseService;
 import com.coolxer.service.dih.AgentLlmService;
@@ -18,10 +20,15 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class AnalysisTaskServiceImplTest {
 
@@ -163,6 +170,29 @@ class AnalysisTaskServiceImplTest {
                 .contains("\"result_parts\":[]");
         assertThat(JacksonConfig.OBJECT_MAPPER.writeValueAsString(listItem))
                 .doesNotContain("result_parts");
+    }
+
+    @Test
+    void completedTaskRemainsTerminal() {
+        AnalysisTaskRepository repository = mock(AnalysisTaskRepository.class);
+        AnalysisTask task = new AnalysisTask()
+                .setStatus(AnalysisTaskStatus.RUNNING)
+                .setExecutionId("execution-1");
+        task.setId(7);
+        when(repository.findById(7)).thenReturn(Optional.of(task));
+        when(repository.save(any(AnalysisTask.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        AnalysisTaskServiceImpl service = new AnalysisTaskServiceImpl();
+        ReflectionTestUtils.setField(service, "analysisTaskRepository", repository);
+
+        ReflectionTestUtils.invokeMethod(service, "finishExecution",
+                7, "execution-1", AnalysisTaskStatus.SUCCESS, "result", null);
+
+        verify(repository).save(task);
+        assertThat(task.getStatus()).isEqualTo(AnalysisTaskStatus.SUCCESS);
+        assertThat(task.getExecutionId()).isEqualTo("execution-1");
+        assertThat(task.getFinishTime()).isNotNull();
+        assertThat(task.getResult()).isEqualTo("result");
     }
 
     private void createSkill(String id, boolean enabled, String agentType, String content) throws Exception {

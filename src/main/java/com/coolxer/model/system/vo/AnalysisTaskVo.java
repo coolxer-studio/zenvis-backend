@@ -52,6 +52,10 @@ public class AnalysisTaskVo implements Serializable {
 
     private Date scheduledTime;
 
+    private Integer scheduleId;
+
+    private Date scheduleFireTime;
+
     private Date startTime;
 
     private Date finishTime;
@@ -81,6 +85,8 @@ public class AnalysisTaskVo implements Serializable {
         this.skillIds = analysisTask.getSkillIds() == null
                 ? new ArrayList<>() : new ArrayList<>(analysisTask.getSkillIds());
         this.scheduledTime = analysisTask.getScheduledTime();
+        this.scheduleId = analysisTask.getScheduleId();
+        this.scheduleFireTime = analysisTask.getScheduleFireTime();
         this.startTime = analysisTask.getStartTime();
         this.finishTime = analysisTask.getFinishTime();
         this.runCount = analysisTask.getRunCount();

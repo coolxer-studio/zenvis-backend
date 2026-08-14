@@ -155,7 +155,8 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
                     blankToNull(search.getName()),
                     search.getStatus(),
                     blankToNull(search.getModel()),
-                    search.getApprovalMode()
+                    search.getApprovalMode(),
+                    search.getScheduleId()
             );
             return new PageRowsVo<>(page.getContent().stream().map(this::toVo).toList(), page.getTotalElements());
         } catch (Exception e) {

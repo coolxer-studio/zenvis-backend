@@ -98,34 +98,18 @@ public class DataInitiator {
     private void initDefaultDashboard() {
         Dashboard systemDashboard = dashboardRepository.findByCode("system-board").orElse(null);
         if (systemDashboard == null) {
-            Dashboard legacyDashboard = dashboardRepository.findByCode("msg-board").orElse(null);
-            if (legacyDashboard != null) {
-                legacyDashboard.setName("系统状态总览");
-                legacyDashboard.setCode("system-board");
-                dashboardRepository.save(legacyDashboard);
-                systemDashboard = legacyDashboard;
-                log.info("已将内置看板编码从 msg-board 迁移为 system-board");
-            } else {
-                List<Dashboard> existingDashboards = dashboardRepository.findAll();
-                systemDashboard = new Dashboard()
-                        .setName("系统状态总览")
-                        .setCode("system-board")
-                        .setType(DashboardType.BUILT)
-                        .setUrl("");
-                if (CollectionUtils.isEmpty(existingDashboards)) {
-                    systemDashboard.setIsDefault(true);
-                    ArrayList<Dashboard> dashboards = new ArrayList<>();
-                    dashboards.add(systemDashboard);
-                    dashboards.add(new Dashboard()
-                            .setName("外链接视图-测试")
-                            .setCode("link-test-baidu")
-                            .setType(DashboardType.LINK)
-                            .setUrl("https://www.baidu.com"));
-                    dashboardRepository.saveAll(dashboards);
-                    return;
-                }
+            List<Dashboard> existingDashboards = dashboardRepository.findAll();
+            systemDashboard = new Dashboard()
+                    .setName("系统状态总览")
+                    .setCode("system-board")
+                    .setType(DashboardType.BUILT)
+                    .setUrl("");
+            if (CollectionUtils.isEmpty(existingDashboards)) {
+                systemDashboard.setIsDefault(true);
                 dashboardRepository.save(systemDashboard);
+                return;
             }
+            dashboardRepository.save(systemDashboard);
         }
         normalizeDefaultDashboard(systemDashboard);
     }
@@ -441,7 +425,7 @@ public class DataInitiator {
             systemInfo.setSystemBanner("/system-files/" + SystemInfoService.SYSTEM_BANNER_FILENAME);
             systemInfo.setSystemTitle("ZenVis");
             systemInfo.setProductName("ZenVis — 数据分析应用框架");
-            systemInfo.setProductVersion("1.0.0.alpha");
+            systemInfo.setProductVersion("1.0.1.alpha");
             systemInfo.setProductIntroduction("ZenVis\n一个基于配置实现的数据存储、可视化及业务扩展的框架平台，实现在通用的数据分析框架之上构建业务应用。提供智能分析能力，全方位满足数据处理、展示、扩展与深度分析需求。");
             systemInfo.setServicePhone("待补充");
             systemInfo.setServiceEmail("coolxer@163.com");

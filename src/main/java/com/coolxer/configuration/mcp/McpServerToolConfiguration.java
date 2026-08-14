@@ -6,11 +6,13 @@ import com.coolxer.controller.config.ConfigMcpTool;
 import com.coolxer.controller.config.ConfigValidationMcpTool;
 import com.coolxer.controller.retrieval.RetrievalMcpTool;
 import com.coolxer.controller.system.AnalysisTaskMcpTool;
+import com.coolxer.controller.system.AnalysisTaskScheduleMcpTool;
 import com.coolxer.controller.system.DashboardMcpTool;
 import com.coolxer.controller.system.MenuMcpTool;
 import com.coolxer.controller.system.PushTaskMcpTool;
 import com.coolxer.service.dih.mcp.McpApprovalService;
 import com.coolxer.service.dih.mcp.McpApprovalToolCallbackProvider;
+import com.coolxer.service.dih.mcp.BuiltinMcpServiceDefinition;
 import com.coolxer.service.dih.mcp.McpToolApproval;
 import com.coolxer.service.dih.mcp.McpToolDescriptor;
 import com.coolxer.service.dih.mcp.McpToolPolicyService;
@@ -34,8 +36,9 @@ import java.util.Map;
 public class McpServerToolConfiguration {
 
     @Bean
-    public ToolCallbackProvider retrievalToolCallbackProvider(RetrievalMcpTool retrievalMcpTool,
+    public McpApprovalToolCallbackProvider retrievalToolCallbackProvider(RetrievalMcpTool retrievalMcpTool,
                                                                     AnalysisTaskMcpTool analysisTaskMcpTool,
+                                                                    AnalysisTaskScheduleMcpTool analysisTaskScheduleMcpTool,
                                                                     PushTaskMcpTool pushTaskMcpTool,
                                                                     ConfigMcpTool configMcpTool,
                                                                     ConfigValidationMcpTool configValidationMcpTool,
@@ -47,6 +50,7 @@ public class McpServerToolConfiguration {
 
         logToolMethods(RetrievalMcpTool.class);
         logToolMethods(AnalysisTaskMcpTool.class);
+        logToolMethods(AnalysisTaskScheduleMcpTool.class);
         logToolMethods(PushTaskMcpTool.class);
         logToolMethods(ConfigMcpTool.class);
         logToolMethods(ConfigValidationMcpTool.class);
@@ -55,13 +59,15 @@ public class McpServerToolConfiguration {
 
         // 创建 MethodToolCallbackProvider
         MethodToolCallbackProvider provider = MethodToolCallbackProvider.builder()
-                .toolObjects(retrievalMcpTool, analysisTaskMcpTool, pushTaskMcpTool, configMcpTool,
+                .toolObjects(retrievalMcpTool, analysisTaskMcpTool, analysisTaskScheduleMcpTool,
+                        pushTaskMcpTool, configMcpTool,
                         configValidationMcpTool, menuMcpTool, dashboardMcpTool)
                 .build();
 
         Map<String, McpToolDescriptor> descriptors = new LinkedHashMap<>();
         addToolDescriptors(descriptors, RetrievalMcpTool.class);
         addToolDescriptors(descriptors, AnalysisTaskMcpTool.class);
+        addToolDescriptors(descriptors, AnalysisTaskScheduleMcpTool.class);
         addToolDescriptors(descriptors, PushTaskMcpTool.class);
         addToolDescriptors(descriptors, ConfigMcpTool.class);
         addToolDescriptors(descriptors, ConfigValidationMcpTool.class);
@@ -93,12 +99,14 @@ public class McpServerToolConfiguration {
             McpToolApproval approval = method.getAnnotation(McpToolApproval.class);
             McpApprovalPolicy defaultPolicy = approval == null ? McpApprovalPolicy.ASK : approval.value();
             String name = tool.name();
+            BuiltinMcpServiceDefinition service = BuiltinMcpServiceDefinition.findByTool(name)
+                    .orElseThrow(() -> new IllegalStateException("内置 MCP 工具未分组: " + name));
             descriptors.put(name, new McpToolDescriptor(
                     McpToolDescriptor.localKey(name),
                     McpToolSourceType.LOCAL,
                     null,
-                    "local",
-                    "ZenVis 内置工具",
+                    service.code(),
+                    service.serviceName(),
                     name,
                     name,
                     null,
